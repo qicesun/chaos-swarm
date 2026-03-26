@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useTranslations } from "@/components/locale-provider";
 import { localizeScenario } from "@/lib/i18n";
 import type { DemoScenarioDefinition, DemoScenarioId } from "@/lib/scenarios";
@@ -12,10 +12,13 @@ interface RunComposerProps {
 
 export function RunComposer({ scenarios }: RunComposerProps) {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { locale, t } = useTranslations();
   const [isPending, startTransition] = useTransition();
   const initialScenario = scenarios[0];
-  const [scenarioId, setScenarioId] = useState<DemoScenarioId>(initialScenario?.id ?? "saucedemo");
+  const requestedScenarioId = searchParams.get("scenario");
+  const requestedScenario = scenarios.find((scenario) => scenario.id === requestedScenarioId);
+  const [scenarioId, setScenarioId] = useState<DemoScenarioId>(requestedScenario?.id ?? initialScenario?.id ?? "saucedemo");
   const [agentCount, setAgentCount] = useState(12);
   const [maxSteps, setMaxSteps] = useState(initialScenario?.recommendedMaxSteps ?? 6);
   const [goal, setGoal] = useState("");
@@ -41,6 +44,15 @@ export function RunComposer({ scenarios }: RunComposerProps) {
 
     setMaxSteps(selectedScenario.recommendedMaxSteps);
   }, [selectedScenario]);
+
+  useEffect(() => {
+    if (!requestedScenario || requestedScenario.id === scenarioId) {
+      return;
+    }
+
+    setScenarioId(requestedScenario.id);
+    setGoal("");
+  }, [requestedScenario, scenarioId]);
 
   async function launchRun() {
     setError(null);

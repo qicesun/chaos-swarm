@@ -77,8 +77,9 @@ export default function Home() {
           </div>
           <div className="mt-6 grid gap-4">
             {scenarios.map((scenario) => (
-              <div
+              <Link
                 key={scenario.id}
+                href={`/runs/new?scenario=${scenario.id}`}
                 className="rounded-[1.5rem] border border-[var(--line)] bg-white/55 p-5 transition hover:border-[var(--accent-soft)]"
               >
                 <div className="flex flex-wrap items-center justify-between gap-3">
@@ -92,7 +93,7 @@ export default function Home() {
                 </div>
                 <p className="mt-3 text-sm leading-7 text-[var(--muted)]">{scenario.description}</p>
                 <p className="mt-4 text-xs uppercase tracking-[0.18em] text-[var(--muted)]">{scenario.targetUrl}</p>
-              </div>
+              </Link>
             ))}
           </div>
         </div>
