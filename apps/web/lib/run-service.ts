@@ -291,11 +291,48 @@ function stageMatched(run: AgentRunResult, scenario: DemoScenarioDefinition, sta
 function buildStageSummary(agentRuns: AgentRunResult[], scenario: DemoScenarioDefinition): StageSnapshot[] {
   return scenario.frames.map((frame) => {
     const reachedRuns = agentRuns.filter((run) => stageMatched(run, scenario, frame));
-    const stuck = reachedRuns.filter((run) =>
-      run.steps.some(
-        (step) => stageMatched({ ...run, steps: [step] }, scenario, frame) && step.observation.page.errorFlags.length > 0,
-      ),
-    ).length;
+    const stuck = reachedRuns.filter((run) => {
+      const stageSteps = run.steps.filter((step) => stageMatched({ ...run, steps: [step] }, scenario, frame));
+
+      if (stageSteps.length === 0) {
+        return false;
+      }
+
+      const entryFrustration = stageSteps[0].frustration;
+      const peakStageFrustration = Math.max(...stageSteps.map((step) => step.frustration), entryFrustration);
+      let frictionSignals = 0;
+
+      if (stageSteps.length > 1) {
+        frictionSignals += 1;
+      }
+
+      if (
+        stageSteps.some(
+          (step) =>
+            step.decision.kind === "scroll" ||
+            step.decision.kind === "retry" ||
+            step.action.kind === "escalate",
+        )
+      ) {
+        frictionSignals += 1;
+      }
+
+      if (
+        stageSteps.some(
+          (step) =>
+            step.observation.page.loadState !== "complete" ||
+            step.observation.page.errorFlags.length > 0,
+        )
+      ) {
+        frictionSignals += 1;
+      }
+
+      if (peakStageFrustration - entryFrustration >= 0.05) {
+        frictionSignals += 1;
+      }
+
+      return frictionSignals >= 2;
+    }).length;
 
     return {
       label: frame.label,

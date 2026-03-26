@@ -32,6 +32,22 @@ function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value));
 }
 
+function hashString(value: string) {
+  let hash = 0;
+
+  for (let index = 0; index < value.length; index += 1) {
+    hash = (hash << 5) - hash + value.charCodeAt(index);
+    hash |= 0;
+  }
+
+  return Math.abs(hash);
+}
+
+function seededOffset(seed: string, salt: string, amplitude: number) {
+  const ratio = (hashString(`${seed}:${salt}`) % 10_000) / 10_000;
+  return (ratio * 2 - 1) * amplitude;
+}
+
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -339,6 +355,7 @@ function buildEmotion(
   current: { frustration: number; confidence: number },
   decision: Decision,
   action: ActionResult,
+  page: PageState,
   errorFlags: string[],
 ) {
   let frustration = current.frustration;
@@ -358,6 +375,21 @@ function buildEmotion(
     frustration += 0.08;
     confidence -= 0.04;
   }
+
+  const targetDensity = clamp((page.visibleTargets.length - 4) / 14, 0, 1);
+  const complexityPenalty =
+    targetDensity * (0.012 + persona.attentionBias * 0.025 + (1 - persona.skillLevel) * 0.015);
+  const loadPenalty =
+    page.loadState === "loading"
+      ? 0.035
+      : page.loadState === "interactive"
+        ? 0.018
+        : page.loadState === "error"
+          ? 0.08
+          : 0;
+  const targetAmbiguityPenalty = page.visibleTargets.length === 0 ? 0.03 : 0;
+  frustration += complexityPenalty + loadPenalty + targetAmbiguityPenalty;
+  confidence -= complexityPenalty * 0.35 + loadPenalty * 0.5;
 
   if (errorFlags.length > 0) {
     frustration += 0.14;
@@ -434,7 +466,7 @@ async function appendStep(
   explicitFlags: string[] = [],
 ) {
   const pageState = await snapshotPage(page, input.config.targetUrl, explicitFlags);
-  const emotion = buildEmotion(input.persona, state, decision, action, pageState.errorFlags);
+  const emotion = buildEmotion(input.persona, state, decision, action, pageState, pageState.errorFlags);
   state.frustration = emotion.frustration;
   state.confidence = emotion.confidence;
 
@@ -1224,9 +1256,18 @@ async function runLiveAgent(
   const agentId = input.agentId ?? buildAgentId(input.persona, 0);
   const startedAt = new Date().toISOString();
   const steps: AgentStepRecord[] = [];
+  const seed = input.config.seed ?? `${scenario.id}:${agentId}`;
   const state = {
-    frustration: initialFrustration(input.persona),
-    confidence: initialConfidence(input.persona),
+    frustration: clamp(
+      initialFrustration(input.persona) + seededOffset(seed, "frustration", 0.025),
+      0,
+      1,
+    ),
+    confidence: clamp(
+      initialConfidence(input.persona) + seededOffset(seed, "confidence", 0.03),
+      0,
+      1,
+    ),
   };
   const context = await browser.newContext({
     viewport: viewportForPersona(input.persona),
