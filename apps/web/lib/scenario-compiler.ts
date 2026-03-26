@@ -4,6 +4,12 @@ import { z } from "zod";
 import { env } from "./env";
 import type { DemoScenarioDefinition } from "./scenarios";
 
+export interface ScenarioCompileResult {
+  scenario: DemoScenarioDefinition;
+  source: "llm" | "fallback";
+  reason?: string;
+}
+
 const scenarioCompileSchema = z.object({
   name: z.string().min(1).max(120),
   siteLabel: z.string().min(1).max(80),
@@ -69,6 +75,10 @@ function deriveSiteLabel(host: string) {
     .join(" ")
     .replace(/[-_]+/g, " ")
     .replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+function buildUserTag(host: string, goal: string) {
+  return `scenario:${slugify(host).slice(0, 18)}:${slugify(goal).slice(0, 28)}`.slice(0, 64);
 }
 
 async function fetchPageHints(targetUrl: string) {
@@ -157,13 +167,17 @@ export async function compileScenarioProfile(input: {
   targetUrl: string;
   goal: string;
   inputSeeds?: Record<string, string>;
-}) {
+}): Promise<ScenarioCompileResult> {
   const pageHints = await fetchPageHints(input.targetUrl);
   const fallback = buildFallbackScenario(input.targetUrl, input.goal, input.inputSeeds ?? {}, pageHints);
   const client = getClient();
 
   if (!client) {
-    return fallback;
+    return {
+      scenario: fallback,
+      source: "fallback",
+      reason: "OpenAI client was unavailable, so the scenario compiler used the deterministic fallback template.",
+    };
   }
 
   try {
@@ -196,31 +210,45 @@ export async function compileScenarioProfile(input: {
           ],
         },
       ],
-      user: `chaos-swarm-scenario:${host}:${slugify(input.goal)}`,
+      user: buildUserTag(host, input.goal),
     });
 
     const parsed = response.output_parsed as ParsedScenarioProfile | null;
 
     if (!parsed) {
-      return fallback;
+      return {
+        scenario: fallback,
+        source: "fallback",
+        reason: "The model did not return a structured scenario profile, so the compiler used the deterministic fallback template.",
+      };
     }
 
     return {
-      id: `custom-${slugify(`${host}-${input.goal}`)}`,
-      name: parsed.name,
-      siteLabel: parsed.siteLabel,
-      targetUrl: input.targetUrl,
-      domainAllowlist: [host],
-      goal: input.goal,
-      description: parsed.description,
-      successDefinition: parsed.successDefinition,
-      recommendedMaxSteps: parsed.recommendedMaxSteps,
-      minimumMaxSteps: Math.min(parsed.minimumMaxSteps, parsed.recommendedMaxSteps),
-      inputSeeds: input.inputSeeds ?? {},
-      frames: parsed.frames,
-      aiHints: parsed.aiHints,
-    } satisfies DemoScenarioDefinition;
-  } catch {
-    return fallback;
+      source: "llm",
+      scenario: {
+        id: `custom-${slugify(`${host}-${input.goal}`)}`,
+        name: parsed.name,
+        siteLabel: parsed.siteLabel,
+        targetUrl: input.targetUrl,
+        domainAllowlist: [host],
+        goal: input.goal,
+        description: parsed.description,
+        successDefinition: parsed.successDefinition,
+        recommendedMaxSteps: parsed.recommendedMaxSteps,
+        minimumMaxSteps: Math.min(parsed.minimumMaxSteps, parsed.recommendedMaxSteps),
+        inputSeeds: input.inputSeeds ?? {},
+        frames: parsed.frames,
+        aiHints: parsed.aiHints,
+      } satisfies DemoScenarioDefinition,
+    };
+  } catch (error) {
+    return {
+      scenario: fallback,
+      source: "fallback",
+      reason:
+        error instanceof Error
+          ? `Scenario compilation failed and fell back to the deterministic template: ${error.message}`
+          : "Scenario compilation failed and fell back to the deterministic template.",
+    };
   }
 }

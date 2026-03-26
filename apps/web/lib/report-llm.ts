@@ -50,6 +50,10 @@ function getClient() {
   return cachedClient;
 }
 
+function buildUserTag(record: RunRecord) {
+  return `chaos-swarm-readable:${record.id}`.slice(0, 64);
+}
+
 function compactRunContext(record: RunRecord) {
   return {
     scenario: record.scenarioName,
@@ -108,7 +112,7 @@ export async function enhanceReadableReport(
           ],
         },
       ],
-      user: `chaos-swarm-readable:${record.id}`,
+      user: buildUserTag(record),
     });
 
     return response.output_parsed ?? null;

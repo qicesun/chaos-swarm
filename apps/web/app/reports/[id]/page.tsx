@@ -4,6 +4,8 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 import type { LocalizedReportCopy, AgentStory, ReportDocument } from "@chaos-swarm/reporting";
 import { T } from "@/components/locale-provider";
+import { localizeStageLabel } from "@/lib/i18n";
+import { getScenario } from "@/lib/scenarios";
 import { getRunRecord } from "@/lib/run-service";
 
 interface ReportPageProps {
@@ -22,12 +24,44 @@ function pick(locale: Locale, copy: LocalizedReportCopy) {
 }
 
 function completionLabel(report: ReportDocument) {
-  const completedStage = report.funnel.find((stage) => stage.name === "Completed");
-  if (!completedStage) {
+  if (report.funnel.length === 0) {
     return "n/a";
   }
 
-  return `${completedStage.completed}/${completedStage.total}`;
+  const terminalStage =
+    report.funnel.find((stage) => /complete|completed/i.test(stage.name)) ??
+    report.funnel[report.funnel.length - 1];
+
+  return `${terminalStage.completed}/${terminalStage.total}`;
+}
+
+function naLabel(locale: Locale) {
+  return locale === "zh" ? "暂无" : "n/a";
+}
+
+function boolLabel(locale: Locale, value: boolean) {
+  return value ? (locale === "zh" ? "开启" : "On") : locale === "zh" ? "关闭" : "Off";
+}
+
+function metricLabel(
+  locale: Locale,
+  key: "efi" | "completion" | "failures" | "highlights" | "visualPurity" | "domAssist",
+) {
+  if (locale === "zh") {
+    if (key === "efi") return "总体阻力 EFI";
+    if (key === "completion") return "完成情况";
+    if (key === "failures") return "主要失败模式";
+    if (key === "highlights") return "高光片段";
+    if (key === "visualPurity") return "像真人操作的程度";
+    return "DOM 恢复占比";
+  }
+
+  if (key === "efi") return "Overall friction (EFI)";
+  if (key === "completion") return "Completion";
+  if (key === "failures") return "Main failure patterns";
+  if (key === "highlights") return "Highlight moments";
+  if (key === "visualPurity") return "Human-like execution";
+  return "DOM recovery share";
 }
 
 function validityCopy(locale: Locale, report: ReportDocument) {
@@ -53,15 +87,15 @@ function metricGuide(locale: Locale) {
   if (locale === "zh") {
     return [
       {
-        title: "EFI",
+        title: "总体阻力 EFI",
         body: "体验阻力指数。越高表示这条路径对蜂群越费力，不一定全是失败，也可能是慢、绕、犹豫多。",
       },
       {
-        title: "Visual purity",
+        title: "像真人操作的程度",
         body: "视觉纯度。越高表示 agent 越多是像真人一样靠屏幕和坐标完成动作。",
       },
       {
-        title: "DOM assist rate",
+        title: "DOM 恢复占比",
         body: "DOM 兜底率。越高表示运行时越频繁需要结构化恢复，说明这次结果离纯视觉用户行为更远。",
       },
     ];
@@ -69,18 +103,91 @@ function metricGuide(locale: Locale) {
 
   return [
     {
-      title: "EFI",
+      title: "Overall friction (EFI)",
       body: "Experience friction index. Higher means the path felt harder, slower, or more fragile to the swarm.",
     },
     {
-      title: "Visual purity",
+      title: "Human-like execution",
       body: "Higher means the agents stayed closer to screen-first, human-like interaction instead of runtime recovery.",
     },
     {
-      title: "DOM assist rate",
+      title: "DOM recovery share",
       body: "Higher means the runtime had to recover more often with structure-aware help, so the run was less purely visual.",
     },
   ];
+}
+
+function topFailurePattern(locale: Locale, report: ReportDocument) {
+  const cluster = report.failureClusters[0];
+
+  if (!cluster) {
+    return locale === "zh"
+      ? "这次运行没有收敛到单一主导失败模式，更像是在展示一条整体比较稳定的基线路径。"
+      : "This run did not converge on a single dominant failure pattern. It behaved more like a stable baseline path.";
+  }
+
+  return locale === "zh"
+    ? `最强的失败模式是“${cluster.label}”。共有 ${cluster.count} 个 agent 受影响，主要原因包括：${cluster.reasons.join("；")}。`
+    : `The strongest failure pattern was "${cluster.label}". It affected ${cluster.count} agent(s). Main reasons: ${cluster.reasons.join("; ")}.`;
+}
+
+function nextActionCopy(locale: Locale, report: ReportDocument) {
+  const firstFinding = report.readable.findings[0];
+
+  if (firstFinding) {
+    return pick(locale, firstFinding.body);
+  }
+
+  return locale === "zh"
+    ? "优先检查最靠前、最影响完成率的边界，然后再决定是产品问题还是执行问题。"
+    : "Inspect the earliest high-impact boundary first, then decide whether the issue is product friction or execution noise.";
+}
+
+function atAGlance(locale: Locale, report: ReportDocument) {
+  return [
+    {
+      title: locale === "zh" ? "发生了什么" : "What happened",
+      body: pick(locale, report.readable.overview),
+    },
+    {
+      title: locale === "zh" ? "这次结果可信吗？" : "Can I trust this result?",
+      body: validityCopy(locale, report),
+    },
+    {
+      title: locale === "zh" ? "最大问题在哪？" : "What bent the run most?",
+      body: topFailurePattern(locale, report),
+    },
+    {
+      title: locale === "zh" ? "下一步建议" : "What should I do next?",
+      body: nextActionCopy(locale, report),
+    },
+  ];
+}
+
+function displaySectionHeading(locale: Locale, heading: string) {
+  if (locale !== "zh") {
+    return heading;
+  }
+
+  if (heading === "Summary") return "总结";
+  if (heading === "Execution Purity") return "执行真实性";
+  if (heading === "EFI") return "总体阻力 EFI";
+  if (heading === "Failure Clusters") return "主要失败模式";
+  if (heading === "Recommendations") return "建议";
+  if (heading === "Status") return "状态";
+  return heading;
+}
+
+function displayFunnelStage(locale: Locale, stageName: string, scenario: ReturnType<typeof getScenario> | null) {
+  if (locale === "zh" && /goal complete/i.test(stageName)) {
+    return "目标完成";
+  }
+
+  if (scenario) {
+    return localizeStageLabel(locale, scenario, stageName);
+  }
+
+  return stageName;
 }
 
 
@@ -121,6 +228,8 @@ export default async function ReportPage({ params }: ReportPageProps) {
   const locale = readLocaleFromCookieStore(await cookies());
   const report = record.report;
   const overview = pick(locale, report.readable.overview);
+  const summaryCards = atAGlance(locale, report);
+  const scenario = record.scenarioProfile ?? getScenario(record.scenarioId);
 
   return (
     <main className="mx-auto flex min-h-screen w-full max-w-7xl flex-col px-6 py-8 lg:px-10">
@@ -164,12 +273,37 @@ export default async function ReportPage({ params }: ReportPageProps) {
       </section>
 
       <section className="mt-8 grid gap-5 lg:grid-cols-4 xl:grid-cols-6">
-        <MetricCard label="EFI" value={String(report.efi.score)} />
-        <MetricCard label={<T k="run.completed" />} value={completionLabel(report)} />
-        <MetricCard label={<T k="report.failureClustersMetric" />} value={String(report.failureClusters.length)} />
-        <MetricCard label={<T k="report.highlights" />} value={String(report.highlightReel.length)} />
-        <MetricCard label={<T k="report.visualPurity" />} value={`${report.executionQuality.visualPurity}%`} />
-        <MetricCard label={<T k="report.domAssistRate" />} value={`${report.executionQuality.domAssistRate}%`} />
+        <MetricCard label={metricLabel(locale, "efi")} value={String(report.efi.score)} />
+        <MetricCard label={metricLabel(locale, "completion")} value={completionLabel(report).replace("n/a", naLabel(locale))} />
+        <MetricCard label={metricLabel(locale, "failures")} value={String(report.failureClusters.length)} />
+        <MetricCard label={metricLabel(locale, "highlights")} value={String(report.highlightReel.length)} />
+        <MetricCard label={metricLabel(locale, "visualPurity")} value={`${report.executionQuality.visualPurity}%`} />
+        <MetricCard label={metricLabel(locale, "domAssist")} value={`${report.executionQuality.domAssistRate}%`} />
+      </section>
+
+      <section className="mt-8 panel rounded-[2rem] p-7">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <p className="text-sm uppercase tracking-[0.25em] text-[var(--muted)]">
+              {locale === "zh" ? "快速结论" : "At a glance"}
+            </p>
+            <h2 className="mt-2 text-3xl font-semibold tracking-tight">
+              {locale === "zh" ? "先看这四张卡片" : "Start with these four cards"}
+            </h2>
+          </div>
+          <p className="max-w-2xl text-sm leading-7 text-[var(--muted)]">
+            {locale === "zh"
+              ? "先理解这次运行意味着什么，再回头读指标、漏斗和失败细节。"
+              : "Understand what this run means first, then come back to the metrics, funnel, and detailed failure evidence."}
+          </p>
+        </div>
+        <div className="mt-6 grid gap-4 lg:grid-cols-2">
+          {summaryCards.map((card) => (
+            <ReadableCard key={card.title} title={card.title}>
+              {card.body}
+            </ReadableCard>
+          ))}
+        </div>
       </section>
 
       <section className="mt-8 grid gap-6 lg:grid-cols-[1.15fr_0.85fr]">
@@ -279,7 +413,7 @@ export default async function ReportPage({ params }: ReportPageProps) {
             {report.funnel.map((stage) => (
               <div key={stage.name} className="rounded-[1.4rem] border border-[var(--line)] bg-white/60 p-4">
                 <div className="flex items-center justify-between gap-4">
-                  <span className="font-semibold">{stage.name}</span>
+                  <span className="font-semibold">{displayFunnelStage(locale, stage.name, scenario)}</span>
                   <span className="font-mono text-sm text-[var(--muted)]">
                     {stage.completed}/{stage.total}
                   </span>
@@ -304,7 +438,7 @@ export default async function ReportPage({ params }: ReportPageProps) {
           <div className="mt-6 grid gap-4">
             <MetricRow
               label={<T k="report.strictVisualMode" />}
-              value={report.executionQuality.strictVisualMode ? "ON" : "OFF"}
+              value={boolLabel(locale, report.executionQuality.strictVisualMode)}
             />
             <MetricRow label={<T k="report.visualPurity" />} value={`${report.executionQuality.visualPurity}%`} />
             <MetricRow label={<T k="report.domAssistRate" />} value={`${report.executionQuality.domAssistRate}%`} />
@@ -349,7 +483,9 @@ export default async function ReportPage({ params }: ReportPageProps) {
                     </div>
                     <span className="font-mono text-sm text-[var(--muted)]">{cluster.count}</span>
                   </div>
-                  <p className="mt-2 text-sm leading-7 text-[var(--muted)]">{cluster.reasons.join("; ")}</p>
+                  <p className="mt-2 text-sm leading-7 text-[var(--muted)]">
+                    {cluster.reasons.join(locale === "zh" ? "；" : "; ")}
+                  </p>
                 </div>
               ))
             )}
@@ -396,7 +532,7 @@ export default async function ReportPage({ params }: ReportPageProps) {
           <div className="mt-5 grid gap-4">
             {report.sections.map((section) => (
               <div key={section.heading} className="rounded-[1.5rem] border border-[var(--line)] bg-white/60 p-5">
-                <h3 className="text-lg font-semibold">{section.heading}</h3>
+                <h3 className="text-lg font-semibold">{displaySectionHeading(locale, section.heading)}</h3>
                 <p className="mt-3 whitespace-pre-line text-sm leading-7 text-[var(--muted)]">{section.body}</p>
               </div>
             ))}

@@ -54,92 +54,119 @@ function titleCase(value: string) {
     .replace(/\b\w/g, (char) => char.toUpperCase());
 }
 
-function describeStepTitle(step: AgentRunResult["steps"][number], stageLabel: string | null) {
-  if (step.readableTitle) {
+function pickLocalized(locale: "en" | "zh", en: string, zh: string) {
+  return locale === "zh" ? zh : en;
+}
+
+function describeStepTitle(
+  step: AgentRunResult["steps"][number],
+  stageLabel: string | null,
+  locale: "en" | "zh" = "en",
+) {
+  if (locale === "zh" && step.readableTitleZh) {
+    return step.readableTitleZh;
+  }
+
+  if (locale === "en" && step.readableTitle) {
     return step.readableTitle;
   }
 
   const target = step.decision.target ?? "";
 
   if (stageLabel && step.action.ok && (step.decision.kind === "wait" || step.decision.kind === "click")) {
-    return `Reached ${stageLabel}`;
+    return pickLocalized(locale, `Reached ${stageLabel}`, `已到达 ${stageLabel}`);
   }
 
   if (step.action.kind === "escalate") {
-    return "Aborted after a runtime problem";
+    return pickLocalized(locale, "Aborted after a runtime problem", "因运行时问题而中止");
   }
 
   if (step.decision.kind === "wait") {
-    return "Loaded the next screen";
+    return pickLocalized(locale, "Loaded the next screen", "等待页面进入下一状态");
   }
 
   if (step.decision.kind === "scroll") {
-    return "Scanned the page before acting";
+    return pickLocalized(locale, "Scanned the page before acting", "先扫描页面再行动");
   }
 
   if (step.decision.kind === "type") {
     if (/login form/i.test(target)) {
-      return "Filled the login form";
+      return pickLocalized(locale, "Filled the login form", "填写了登录表单");
     }
 
     if (/registration form/i.test(target)) {
-      return "Filled the registration form";
+      return pickLocalized(locale, "Filled the registration form", "填写了注册表单");
     }
 
     if (/validation form/i.test(target)) {
-      return "Filled the validation form";
+      return pickLocalized(locale, "Filled the validation form", "填写了校验表单");
     }
 
     if (/search/i.test(target)) {
-      return "Entered a search query";
+      return pickLocalized(locale, "Entered a search query", "输入了搜索词");
     }
 
-    return `Entered information into ${target || "the form"}`;
+    return pickLocalized(
+      locale,
+      `Entered information into ${target || "the form"}`,
+      `向${target || "表单"}输入了信息`,
+    );
   }
 
   if (step.decision.kind === "click") {
     if (/login/i.test(target)) {
-      return "Submitted the login action";
+      return pickLocalized(locale, "Submitted the login action", "提交了登录动作");
     }
 
     if (/register/i.test(target)) {
-      return "Submitted the registration action";
+      return pickLocalized(locale, "Submitted the registration action", "提交了注册动作");
     }
 
     if (/add to cart/i.test(target)) {
-      return "Added the item to cart";
+      return pickLocalized(locale, "Added the item to cart", "把商品加入了购物车");
     }
 
     if (/view cart|shopping cart|cart review/i.test(target)) {
-      return "Opened the cart view";
+      return pickLocalized(locale, "Opened the cart view", "打开了购物车页面");
     }
 
     if (/view product/i.test(target)) {
-      return "Opened the product detail page";
+      return pickLocalized(locale, "Opened the product detail page", "打开了商品详情页");
     }
 
     if (/form authentication/i.test(target)) {
-      return "Opened the authentication module";
+      return pickLocalized(locale, "Opened the authentication module", "打开了认证模块");
     }
 
     if (/search submit/i.test(target)) {
-      return "Submitted the search";
+      return pickLocalized(locale, "Submitted the search", "提交了搜索");
     }
 
-    return `Clicked ${target || "the next control"}`;
+    return pickLocalized(locale, `Clicked ${target || "the next control"}`, `点击了${target || "下一个控件"}`);
   }
 
   if (step.decision.kind === "retry") {
-    return `Retried ${target || "the previous action"}`;
+    return pickLocalized(locale, `Retried ${target || "the previous action"}`, `重试了${target || "上一步动作"}`);
   }
 
-  return `${titleCase(step.decision.kind)} action`;
+  return pickLocalized(locale, `${titleCase(step.decision.kind)} action`, `${titleCase(step.decision.kind)} 动作`);
 }
 
-function describeStepDetail(step: AgentRunResult["steps"][number]) {
-  if (step.readableDetail) {
-    const reason = step.action.ok ? step.successReason : step.failureReason;
-    return reason ? `${step.readableDetail} Reason: ${reason}` : step.readableDetail;
+function describeStepDetail(step: AgentRunResult["steps"][number], locale: "en" | "zh" = "en") {
+  const detail = locale === "zh" ? step.readableDetailZh ?? step.readableDetail : step.readableDetail;
+  const reason =
+    locale === "zh"
+      ? step.action.ok
+        ? step.successReasonZh ?? step.successReason
+        : step.failureReasonZh ?? step.failureReason
+      : step.action.ok
+        ? step.successReason
+        : step.failureReason;
+
+  if (detail) {
+    return reason
+      ? pickLocalized(locale, `${detail} Reason: ${reason}`, `${detail} 原因：${reason}`)
+      : detail;
   }
 
   return step.action.details || step.observation.summary;
@@ -150,36 +177,7 @@ function getStageLabelForStep(step: AgentRunResult["steps"][number], scenario: D
     return step.stageLabel;
   }
 
-  const matchedStage = scenario.frames.find((stage) =>
-    stageMatched(
-      {
-        agentId: "timeline",
-        persona: {
-          archetype: "Speedrunner",
-          skillLevel: 1,
-          patience: 1,
-          attentionBias: 1,
-          readingSpeed: 1,
-          rageThreshold: 1,
-        },
-        config: {
-          targetUrl: step.observation.page.url,
-          goal: "",
-          maxSteps: step.step + 1,
-          demoMode: false,
-        },
-        startedAt: step.timestamp,
-        finishedAt: step.timestamp,
-        completed: false,
-        failed: false,
-        finalPage: step.observation.page,
-        summary: step.observation.summary,
-        steps: [step],
-      },
-      scenario,
-      stage,
-    ),
-  );
+  const matchedStage = scenario.frames.find((stage) => step.stageId === stage.id);
 
   return matchedStage?.label ?? null;
 }
@@ -189,7 +187,8 @@ function toTimeline(agentRuns: AgentRunResult[], scenario: DemoScenarioDefinitio
     .flatMap((run) => {
       return run.steps.map((step) => {
         const stageLabel = getStageLabelForStep(step, scenario);
-        const title = describeStepTitle(step, stageLabel);
+        const title = describeStepTitle(step, stageLabel, "en");
+        const titleZh = describeStepTitle(step, stageLabel, "zh");
 
         return {
           id: `${run.agentId}-${step.step}`,
@@ -199,7 +198,9 @@ function toTimeline(agentRuns: AgentRunResult[], scenario: DemoScenarioDefinitio
           timestamp: step.timestamp,
           stageLabel,
           title,
-          detail: describeStepDetail(step),
+          detail: describeStepDetail(step, "en"),
+          titleZh,
+          detailZh: describeStepDetail(step, "zh"),
           rationale: step.decision.rationale,
           action: title,
           actionCode: `${step.decision.kind} -> ${step.action.kind}`,
@@ -238,51 +239,9 @@ function buildPersonaSummary(agentRuns: AgentRunResult[]): PersonaSnapshot[] {
   return [...map.values()];
 }
 
-function stageMatched(run: AgentRunResult, scenario: DemoScenarioDefinition, stage: DemoScenarioDefinition["frames"][number]) {
-  const stagePath = new URL(stage.url).pathname;
-  const stageTargetTokens = stage.targets.map((target) => target.toLowerCase());
-  const stageDescriptionTokens = (stage.description ?? "")
-    .toLowerCase()
-    .split(/[^a-z0-9]+/g)
-    .filter((token) => token.length >= 4);
-
+function stageMatched(run: AgentRunResult, _scenario: DemoScenarioDefinition, stage: DemoScenarioDefinition["frames"][number]) {
   return run.steps.some((step) => {
-    if (step.stageId === stage.id || step.stageLabel === stage.label) {
-      return true;
-    }
-
-    const stepUrl = step.observation.page.url;
-
-    if (stagePath !== "/") {
-      if (stepUrl.includes(stagePath)) {
-        return true;
-      }
-    }
-
-    const surfaceText = [
-      step.observation.page.title,
-      step.observation.summary,
-      ...step.observation.page.visibleTargets,
-      step.readableDetail,
-      step.readableTitle,
-    ]
-      .filter(Boolean)
-      .join(" | ")
-      .toLowerCase();
-
-    if (stageTargetTokens.some((token) => surfaceText.includes(token))) {
-      return true;
-    }
-
-    if (stageDescriptionTokens.some((token) => surfaceText.includes(token))) {
-      return true;
-    }
-
-    if (stagePath === "/" && step.step === 0) {
-      return scenario.domainAllowlist.some((domain) => stepUrl.includes(domain));
-    }
-
-    return false;
+    return step.stageId === stage.id || step.stageLabel === stage.label;
   });
 }
 
@@ -539,15 +498,25 @@ interface CreatedRun {
 }
 
 export async function createRun(input: unknown) {
+  if (!env.openAiApiKey && env.executionMode !== "simulation") {
+    throw new Error("OPENAI_API_KEY is required for real AI-agent runs. Configure the key or switch to simulation mode.");
+  }
+
   const payload = createRunSchema.parse(input);
-  const scenario =
-    payload.demoScenario && hasScenario(payload.demoScenario)
-      ? getScenario(payload.demoScenario)
-      : await compileScenarioProfile({
-          targetUrl: payload.targetUrl!,
-          goal: payload.goal!,
-          inputSeeds: payload.inputSeeds,
-        });
+  let scenario = payload.demoScenario && hasScenario(payload.demoScenario) ? getScenario(payload.demoScenario) : null;
+  let scenarioCompileSource: "static" | "llm" | "fallback" = "static";
+  let scenarioCompileReason: string | undefined;
+
+  if (!scenario) {
+    const compiledScenario = await compileScenarioProfile({
+      targetUrl: payload.targetUrl!,
+      goal: payload.goal!,
+      inputSeeds: payload.inputSeeds,
+    });
+    scenario = compiledScenario.scenario;
+    scenarioCompileSource = compiledScenario.source;
+    scenarioCompileReason = compiledScenario.reason;
+  }
 
   if (!scenario) {
     throw new Error(`Unknown demo scenario "${payload.demoScenario}".`);
@@ -596,7 +565,15 @@ export async function createRun(input: unknown) {
   }
 
   if (!payload.demoScenario || !hasScenario(payload.demoScenario)) {
-    record.warnings.push("This run is using an AI-compiled scenario profile generated from the supplied URL and goal.");
+    record.warnings.push(
+      scenarioCompileSource === "llm"
+        ? "This run is using an AI-compiled scenario profile generated from the supplied URL and goal."
+        : "This run fell back to the deterministic custom-scenario template because the AI compiler did not return a reliable profile.",
+    );
+  }
+
+  if (scenarioCompileReason) {
+    record.warnings.push(scenarioCompileReason);
   }
 
   upsertRunInStore(record);

@@ -72,9 +72,14 @@ export interface AgentStepRecord {
   goalStatus?: "not_started" | "in_progress" | "blocked" | "complete";
   readableTitle?: string | null;
   readableDetail?: string | null;
+  readableTitleZh?: string | null;
+  readableDetailZh?: string | null;
   successReason?: string | null;
   failureReason?: string | null;
+  successReasonZh?: string | null;
+  failureReasonZh?: string | null;
   visibleBlockers?: string[];
+  visibleBlockersZh?: string[];
   frustration: number;
   confidence: number;
   timestamp: string;

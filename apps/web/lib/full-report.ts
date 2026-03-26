@@ -40,7 +40,9 @@ function eventLine(event: RunRecord["events"][number]) {
   return [
     `- [${event.timestamp}] ${event.agentId}`,
     `title=${event.title}`,
+    `titleZh=${event.titleZh ?? "n/a"}`,
     `detail=${event.detail}`,
+    `detailZh=${event.detailZh ?? "n/a"}`,
     `why=${event.rationale}`,
     `stage=${event.stageLabel ?? "unclassified"}`,
     `frustration=${event.frustration}%`,
@@ -56,7 +58,9 @@ function stepLine(step: RunRecord["agentRuns"][number]["steps"][number]) {
   return [
     `- step ${step.step}`,
     `title=${step.readableTitle ?? "n/a"}`,
+    `titleZh=${step.readableTitleZh ?? "n/a"}`,
     `detail=${step.readableDetail ?? "n/a"}`,
+    `detailZh=${step.readableDetailZh ?? "n/a"}`,
     `decision=${step.decision.kind}`,
     `action=${step.action.kind}`,
     `ok=${step.action.ok}`,
@@ -111,7 +115,7 @@ export function renderPortableRunReportMarkdown(record: RunRecord) {
   const lines = [
     "# Chaos Swarm Full Report",
     "",
-    "Paste this entire document back into Codex or ChatGPT for secondary analysis.",
+    "Use this export for follow-up analysis or internal sharing.",
     "",
     "## Run Metadata",
     `- Run ID: ${portable.run.id}`,
@@ -139,6 +143,11 @@ export function renderPortableRunReportMarkdown(record: RunRecord) {
     "### Overview",
     `- EN: ${readable.overview.en}`,
     `- ZH: ${readable.overview.zh}`,
+    "",
+    "### What To Conclude",
+    ...(readable.findings[0]
+      ? [`- EN: ${readable.findings[0].body.en}`, `- ZH: ${readable.findings[0].body.zh}`]
+      : ["- No model-authored conclusion available."]),
     "",
     "### Metric Explanations",
     ...(readable.metrics.length > 0

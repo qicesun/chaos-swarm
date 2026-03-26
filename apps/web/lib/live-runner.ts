@@ -1445,7 +1445,16 @@ async function appendStep(
   pageStateOverride?: PageState,
   readable?: Pick<
     AgentStepRecord,
-    "readableTitle" | "readableDetail" | "successReason" | "failureReason" | "visibleBlockers"
+    | "readableTitle"
+    | "readableDetail"
+    | "readableTitleZh"
+    | "readableDetailZh"
+    | "successReason"
+    | "failureReason"
+    | "successReasonZh"
+    | "failureReasonZh"
+    | "visibleBlockers"
+    | "visibleBlockersZh"
   >,
 ) {
   const pageState = pageStateOverride ?? (await snapshotPage(page, input.config.targetUrl, explicitFlags));
@@ -1467,9 +1476,14 @@ async function appendStep(
     goalStatus: progress?.goalStatus ?? "in_progress",
     readableTitle: readable?.readableTitle ?? null,
     readableDetail: readable?.readableDetail ?? null,
+    readableTitleZh: readable?.readableTitleZh ?? null,
+    readableDetailZh: readable?.readableDetailZh ?? null,
     successReason: readable?.successReason ?? null,
     failureReason: readable?.failureReason ?? null,
+    successReasonZh: readable?.successReasonZh ?? null,
+    failureReasonZh: readable?.failureReasonZh ?? null,
     visibleBlockers: readable?.visibleBlockers ?? [],
+    visibleBlockersZh: readable?.visibleBlockersZh ?? [],
     frustration: state.frustration,
     confidence: state.confidence,
     timestamp: new Date().toISOString(),
@@ -1581,14 +1595,33 @@ async function runModelDrivenFlow(
     const nextCandidates = await extractInteractiveCandidates(page);
     const nextScreenshotDataUrl = await captureViewportDataUrl(page);
     const fallbackOutcome = {
-      currentStageId: modelDecision.currentStageId,
-      currentStageLabel: modelDecision.currentStageLabel,
-      goalStatus: modelDecision.goalStatus,
-      stepTitle: `${decision.kind[0]?.toUpperCase() ?? ""}${decision.kind.slice(1)} action`,
-      stepDetail: `${modelDecision.pageAssessment} ${action.details}`.trim(),
-      successReason: action.ok ? modelDecision.nextAction.rationale : null,
-      failureReason: action.ok ? null : action.details,
-      visibleBlockers: nextPageState.errorFlags.slice(0, 4),
+      currentStageId: null,
+      currentStageLabel: null,
+      goalStatus: action.ok ? ("in_progress" as const) : ("blocked" as const),
+      stepTitle: {
+        en: `${decision.kind[0]?.toUpperCase() ?? ""}${decision.kind.slice(1)} action`,
+        zh: `${decision.kind[0]?.toUpperCase() ?? ""}${decision.kind.slice(1)} action`,
+      },
+      stepDetail: {
+        en: `${modelDecision.pageAssessment} ${action.details}`.trim(),
+        zh: `${modelDecision.pageAssessment} ${action.details}`.trim(),
+      },
+      successReason: action.ok
+        ? {
+            en: modelDecision.nextAction.rationale,
+            zh: modelDecision.nextAction.rationale,
+          }
+        : null,
+      failureReason: action.ok
+        ? null
+        : {
+            en: action.details,
+            zh: action.details,
+          },
+      visibleBlockers: nextPageState.errorFlags.slice(0, 4).map((flag) => ({
+        en: flag,
+        zh: flag,
+      })),
     };
     const outcomeAssessment = await assessStepOutcome({
       scenarioName: scenario.name,
@@ -1638,7 +1671,7 @@ async function runModelDrivenFlow(
       state,
       decision,
       action,
-      outcomeAssessment.stepDetail,
+      outcomeAssessment.stepDetail.en,
       callbacks,
       [],
       {
@@ -1648,11 +1681,16 @@ async function runModelDrivenFlow(
       },
       nextPageState,
       {
-        readableTitle: outcomeAssessment.stepTitle,
-        readableDetail: outcomeAssessment.stepDetail,
-        successReason: outcomeAssessment.successReason,
-        failureReason: outcomeAssessment.failureReason,
-        visibleBlockers: outcomeAssessment.visibleBlockers,
+        readableTitle: outcomeAssessment.stepTitle.en,
+        readableDetail: outcomeAssessment.stepDetail.en,
+        readableTitleZh: outcomeAssessment.stepTitle.zh,
+        readableDetailZh: outcomeAssessment.stepDetail.zh,
+        successReason: outcomeAssessment.successReason?.en ?? null,
+        failureReason: outcomeAssessment.failureReason?.en ?? null,
+        successReasonZh: outcomeAssessment.successReason?.zh ?? null,
+        failureReasonZh: outcomeAssessment.failureReason?.zh ?? null,
+        visibleBlockers: outcomeAssessment.visibleBlockers.map((blocker) => blocker.en),
+        visibleBlockersZh: outcomeAssessment.visibleBlockers.map((blocker) => blocker.zh),
       },
     );
 

@@ -10,6 +10,8 @@ export interface TimelineEvent {
   stageLabel: string | null;
   title: string;
   detail: string;
+  titleZh?: string;
+  detailZh?: string;
   rationale: string;
   action: string;
   actionCode: string;

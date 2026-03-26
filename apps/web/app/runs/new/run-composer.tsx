@@ -22,6 +22,7 @@ export function RunComposer({ scenarios }: RunComposerProps) {
   const [useCustomScenario, setUseCustomScenario] = useState(false);
   const [customTargetUrl, setCustomTargetUrl] = useState("");
   const [customGoal, setCustomGoal] = useState("");
+  const [customInputSeeds, setCustomInputSeeds] = useState("");
   const [agentCount, setAgentCount] = useState(12);
   const [maxSteps, setMaxSteps] = useState(initialScenario?.recommendedMaxSteps ?? 6);
   const [goal, setGoal] = useState("");
@@ -67,6 +68,15 @@ export function RunComposer({ scenarios }: RunComposerProps) {
     }
 
     try {
+      let parsedInputSeeds: Record<string, string> | undefined;
+
+      if (useCustomScenario && customInputSeeds.trim()) {
+        const parsed = JSON.parse(customInputSeeds) as Record<string, unknown>;
+        parsedInputSeeds = Object.fromEntries(
+          Object.entries(parsed).map(([key, value]) => [key, String(value ?? "")]),
+        );
+      }
+
       const response = await fetch("/api/runs", {
         method: "POST",
         headers: {
@@ -79,6 +89,7 @@ export function RunComposer({ scenarios }: RunComposerProps) {
           strictVisualMode,
           goal: useCustomScenario ? customGoal.trim() : goal.trim() || selectedScenario.goal,
           targetUrl: useCustomScenario ? customTargetUrl.trim() : selectedScenario.targetUrl,
+          inputSeeds: parsedInputSeeds,
         }),
       });
 
@@ -177,9 +188,22 @@ export function RunComposer({ scenarios }: RunComposerProps) {
                 <textarea
                   value={customGoal}
                   onChange={(event) => setCustomGoal(event.target.value)}
-                  placeholder="Find the pricing page and open a plan comparison."
+                  placeholder={t("composer.customGoalPlaceholder")}
                   className="mt-2 min-h-24 w-full rounded-[1.25rem] border border-[var(--line)] bg-white/75 px-4 py-3 outline-none transition focus:border-[var(--accent)]"
                 />
+              </label>
+
+              <label className="block">
+                <span className="text-sm font-semibold">{t("composer.customDataLabel")} (JSON)</span>
+                <textarea
+                  value={customInputSeeds}
+                  onChange={(event) => setCustomInputSeeds(event.target.value)}
+                  placeholder={'{"username":"demo_user","password":"secret123","search_query":"pricing"}'}
+                  className="mt-2 min-h-28 w-full rounded-[1.25rem] border border-[var(--line)] bg-white/75 px-4 py-3 font-mono text-sm outline-none transition focus:border-[var(--accent)]"
+                />
+                <p className="mt-2 text-xs leading-6 text-[var(--muted)]">
+                  {t("composer.customDataBody")}
+                </p>
               </label>
             </>
           ) : null}
@@ -226,7 +250,7 @@ export function RunComposer({ scenarios }: RunComposerProps) {
             />
             <p className="mt-2 text-xs leading-6 text-[var(--muted)]">
               {useCustomScenario
-                ? "Recommended 6 steps. AI-compiled scenarios keep a minimum of 4 steps so the swarm can establish and verify a goal path."
+                ? t("composer.customStepsHint")
                 : t("composer.recommendedSteps", {
                     recommended: selectedScenario.recommendedMaxSteps,
                     minimum: selectedScenario.minimumMaxSteps,

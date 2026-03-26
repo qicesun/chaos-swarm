@@ -38,6 +38,11 @@ function buildSeedSuffix(seed: string) {
   return seed.replace(/[^a-z0-9]/gi, "").slice(-8).toLowerCase() || "agent001";
 }
 
+function buildUserTag(scenario: DemoScenarioDefinition, persona: AgentPersona, seed: string) {
+  const compactSeed = seed.replace(/[^a-z0-9]/gi, "").slice(-10).toLowerCase();
+  return `playbook:${scenario.id.slice(0, 18)}:${persona.archetype.toLowerCase()}:${compactSeed}`.slice(0, 64);
+}
+
 function personaDirective(persona: AgentPersona) {
   if (persona.archetype === "Speedrunner") {
     return "Move directly toward the goal, prefer the shortest visible path, and avoid unnecessary scanning.";
@@ -151,7 +156,7 @@ export async function buildScenarioPlaybook(
           ],
         },
       ],
-      user: `chaos-swarm-playbook:${scenario.id}:${persona.archetype}:${seed}`,
+      user: buildUserTag(scenario, persona, seed),
     });
 
     if (!response.output_parsed) {

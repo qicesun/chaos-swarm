@@ -364,7 +364,7 @@ function buildRecoveredReport(run: RunRow, agentRuns: AgentRunResult[], strictVi
       readable: {
         overview: {
           en: "This record was recovered from persistence before the full report payload was available.",
-          zh: "This record was recovered from persistence before the full report payload was available.",
+          zh: "这条记录是在完整报告载荷可用之前，从持久化层恢复出来的。",
         },
         metrics: [],
         findings: [],
