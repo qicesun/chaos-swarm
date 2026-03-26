@@ -1,4 +1,8 @@
+import OpenAI from "openai";
+import { zodTextFormat } from "openai/helpers/zod";
+import { z } from "zod";
 import type { AgentPersona } from "@chaos-swarm/agent-core";
+import { env } from "./env";
 import type { DemoScenarioDefinition } from "./scenarios";
 
 export interface ScenarioPlaybook {
@@ -6,6 +10,28 @@ export interface ScenarioPlaybook {
   allowedValues: Record<string, string>;
   completionHints: string[];
   safetyRules: string[];
+}
+
+const playbookSchema = z.object({
+  mission: z.string().min(1).max(260),
+  completionHints: z.array(z.string().min(1).max(220)).min(2).max(5),
+  safetyRules: z.array(z.string().min(1).max(220)).min(3).max(6),
+});
+
+let cachedClient: OpenAI | null = null;
+
+function getClient() {
+  if (!env.openAiApiKey) {
+    return null;
+  }
+
+  if (!cachedClient) {
+    cachedClient = new OpenAI({
+      apiKey: env.openAiApiKey,
+    });
+  }
+
+  return cachedClient;
 }
 
 function buildSeedSuffix(seed: string) {
@@ -18,122 +44,127 @@ function personaDirective(persona: AgentPersona) {
   }
 
   if (persona.archetype === "Novice") {
-    return "Read the page more carefully, tolerate a little ambiguity, and be willing to scan before committing.";
+    return "Read the page more carefully, tolerate a little ambiguity, and scan before committing.";
   }
 
   return "You are impatient, react strongly to friction, and prefer forceful progress over careful reading.";
 }
 
-export function buildScenarioPlaybook(
+function resolveInputSeeds(
+  scenario: DemoScenarioDefinition,
+  seed: string,
+): Record<string, string> {
+  const suffix = buildSeedSuffix(seed);
+  return Object.fromEntries(
+    Object.entries(scenario.inputSeeds).map(([key, value]) => [
+      key,
+      value.replaceAll("{suffix}", suffix).replaceAll("{suffix8}", suffix.padStart(8, "0").slice(0, 8)),
+    ]),
+  );
+}
+
+function buildFallbackPlaybook(
+  scenario: DemoScenarioDefinition,
+  persona: AgentPersona,
+  allowedValues: Record<string, string>,
+): ScenarioPlaybook {
+  const finalFrame = scenario.frames.at(-1);
+  const preferredStrategies = scenario.aiHints?.preferredStrategies ?? [];
+  const completionCues = scenario.aiHints?.completionCues ?? [];
+  const decoyCues = scenario.aiHints?.decoyCues ?? [];
+
+  return {
+    mission: `${personaDirective(persona)} ${scenario.goal}`,
+    allowedValues,
+    completionHints: [
+      `Treat the task as complete only when the page clearly matches the success surface for "${finalFrame?.label ?? scenario.name}". ${scenario.successDefinition}`,
+      `Use the scenario goal and visible targets together; do not stop on a partially completed page.`,
+      ...completionCues.slice(0, 2).map((cue) => `Visible completion cue: ${cue}.`),
+    ],
+    safetyRules: [
+      "Only choose actions that can be grounded in the provided candidate list.",
+      "Do not invent hidden controls, extra pages, or credentials outside the provided allowed values.",
+      "If the goal is already satisfied on the current page, stop instead of exploring unrelated UI.",
+      "If the page is clearly blocked or no safe progress is possible, escalate instead of guessing.",
+      ...preferredStrategies.slice(0, 2).map((strategy) => `Preferred strategy: ${strategy}.`),
+      ...decoyCues.slice(0, 2).map((cue) => `Ignore decoy surface: ${cue}.`),
+    ],
+  };
+}
+
+export async function buildScenarioPlaybook(
   scenario: DemoScenarioDefinition,
   persona: AgentPersona,
   seed: string,
-): ScenarioPlaybook {
-  const suffix = buildSeedSuffix(seed);
-  const commonRules = [
-    "Only choose actions that can be grounded in the provided candidate list.",
-    "Do not invent hidden controls, extra pages, or credentials outside the provided allowed values.",
-    "If the goal is already satisfied, choose stop instead of exploring unrelated UI.",
-    "If the page is clearly blocked or no safe progress is possible, choose escalate.",
-  ];
+): Promise<ScenarioPlaybook> {
+  const allowedValues = resolveInputSeeds(scenario, seed);
+  const fallback = buildFallbackPlaybook(scenario, persona, allowedValues);
+  const client = getClient();
 
-  if (scenario.id === "saucedemo") {
-    return {
-      mission: `${personaDirective(persona)} Log in, add a visible inventory item to cart, and end on the cart review page.`,
-      allowedValues: {
-        username: "standard_user",
-        password: "secret_sauce",
-      },
-      completionHints: [
-        "The task is complete once the cart page is visible.",
-        "The shopping cart link and cart review page are the success boundary.",
-      ],
-      safetyRules: [
-        ...commonRules,
-        "After one item is added, stop clicking Add to cart and move to the shopping cart surface.",
-      ],
-    };
+  if (!client) {
+    return fallback;
   }
 
-  if (scenario.id === "automationexercise") {
-    return {
-      mission: `${personaDirective(persona)} Search for the Blue Top product, open its detail page, add it to cart, and end on the cart review page.`,
-      allowedValues: {
-        search_query: "Blue Top",
+  try {
+    const response = await client.responses.parse({
+      model: env.agentModel,
+      text: {
+        format: zodTextFormat(playbookSchema, "chaos_swarm_playbook"),
       },
-      completionHints: [
-        "The task is complete when the view_cart page is visible.",
-        "Using the site search is the intended path to the Blue Top detail page.",
+      instructions:
+        "You compile a concise operating playbook for a visual browser-testing AI agent. Produce a mission, completion hints, and safety rules from the scenario definition. Do not invent credentials, URLs, or hidden steps beyond the supplied scenario. Optimize for a screen-driven agent acting on a real site. Completion hints should describe what visible evidence means the goal is truly done. Safety rules should prevent common navigation mistakes, false positives, and irrelevant UI exploration.",
+      input: [
+        {
+          role: "user",
+          content: [
+            {
+              type: "input_text",
+              text: JSON.stringify(
+                {
+                  scenario: {
+                    id: scenario.id,
+                    name: scenario.name,
+                    siteLabel: scenario.siteLabel,
+                    targetUrl: scenario.targetUrl,
+                    domainAllowlist: scenario.domainAllowlist,
+                    goal: scenario.goal,
+                    description: scenario.description,
+                    successDefinition: scenario.successDefinition,
+                    frames: scenario.frames,
+                    providedValues: allowedValues,
+                    aiHints: scenario.aiHints ?? null,
+                  },
+                  persona: {
+                    archetype: persona.archetype,
+                    skillLevel: persona.skillLevel,
+                    patience: persona.patience,
+                    attentionBias: persona.attentionBias,
+                    readingSpeed: persona.readingSpeed,
+                    rageThreshold: persona.rageThreshold,
+                    directive: personaDirective(persona),
+                  },
+                },
+                null,
+                2,
+              ),
+            },
+          ],
+        },
       ],
-      safetyRules: [
-        ...commonRules,
-        "Use the Search Product box and submit the Blue Top query before taking any product action.",
-        "Inspect the product detail before finishing the add-to-cart task whenever a View Product path is visible.",
-        "If Blue Top is visible in the catalog but View Product is not yet visible, scroll to reveal View Product instead of using Add to cart from the grid.",
-        "Do not use Add to cart from the broad catalog grid before the Blue Top search has been submitted.",
-        "After the product is added, move to View Cart or Cart instead of repeating Add to cart.",
-      ],
-    };
-  }
+      user: `chaos-swarm-playbook:${scenario.id}:${persona.archetype}:${seed}`,
+    });
 
-  if (scenario.id === "theinternet") {
+    if (!response.output_parsed) {
+      return fallback;
+    }
+
     return {
-      mission: `${personaDirective(persona)} Enter the Form Authentication module, sign in, and end on the secure area page.`,
-      allowedValues: {
-        username: "tomsmith",
-        password: "SuperSecretPassword!",
-      },
-      completionHints: [
-        "The task is complete once the secure area or Logout control is visible.",
-        "The correct module name is Form Authentication.",
-      ],
-      safetyRules: [...commonRules, "Do not substitute Basic Auth, Digest Authentication, or any other auth-related module for Form Authentication."],
+      mission: response.output_parsed.mission,
+      completionHints: response.output_parsed.completionHints,
+      safetyRules: response.output_parsed.safetyRules,
+      allowedValues,
     };
+  } catch {
+    return fallback;
   }
-
-  if (scenario.id === "expandtesting") {
-    return {
-      mission: `${personaDirective(persona)} Fill the validation form with valid data and submit it successfully.`,
-      allowedValues: {
-        contact_name: "Chaos Swarm",
-        contact_number: "012-3456789",
-        pickup_date: "2026-04-15",
-        payment_method: "card",
-      },
-      completionHints: [
-        "The task is complete when the form confirmation page is visible.",
-        "All required fields should be valid before submitting.",
-      ],
-      safetyRules: [
-        ...commonRules,
-        "A filled form alone is not completion; submit Register and observe the confirmation page.",
-      ],
-    };
-  }
-
-  return {
-    mission: `${personaDirective(persona)} Complete the ParaBank registration flow and end on the signed-in account services dashboard.`,
-    allowedValues: {
-      first_name: "Chaos",
-      last_name: "Swarm",
-      street: "1 Market St",
-      city: "San Francisco",
-      state: "CA",
-      zip_code: "94105",
-      phone_number: "4155550101",
-      ssn: suffix.padStart(8, "0").slice(0, 8),
-      username: `chaosswarm${suffix}`,
-      password: "SuperSecret123!",
-      repeated_password: "SuperSecret123!",
-    },
-    completionHints: [
-      "The task is complete once account-services links such as Open New Account, Accounts Overview, or Log Out are visible.",
-      "A unique username is required for registration.",
-    ],
-    safetyRules: [
-      ...commonRules,
-      "Ignore the Customer Login sidebar until registration succeeds.",
-      "Prefer the main registration surface labeled Signing up is easy! over any smaller login widget.",
-    ],
-  };
 }

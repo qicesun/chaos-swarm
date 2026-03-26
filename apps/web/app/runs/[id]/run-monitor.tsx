@@ -53,7 +53,7 @@ export function RunMonitor({ initialRun }: RunMonitorProps) {
   }, [run.id, run.status]);
 
   const reportReady = run.status === "completed";
-  const scenario = useMemo(() => getScenario(run.scenarioId), [run.scenarioId]);
+  const scenario = useMemo(() => run.scenarioProfile ?? getScenario(run.scenarioId), [run.scenarioId, run.scenarioProfile]);
   const scenarioName = localizeScenarioName(locale, scenario, run.scenarioName);
   const scenarioGoal = localizeScenarioGoal(locale, scenario, run.goal);
   const runStatusLabel =

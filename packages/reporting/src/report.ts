@@ -61,7 +61,14 @@ function normalizeToken(value: string) {
 
 function classifyFailure(run: AgentRunResultLike): FailureClassification {
   const last = latestStep(run);
-  const errorBlob = [last?.action.details, last?.observation.summary, ...run.finalPage.errorFlags]
+  const errorBlob = [
+    last?.failureReason,
+    last?.action.details,
+    last?.readableDetail,
+    last?.observation.summary,
+    ...(last?.visibleBlockers ?? []),
+    ...run.finalPage.errorFlags,
+  ]
     .filter(Boolean)
     .join(" | ");
 
@@ -290,7 +297,7 @@ function hasOperationalNoise(report: ReportDocument) {
 function buildAgentStories(agentRuns: AgentRunResultLike[]): AgentStory[] {
   return agentRuns.slice(0, 4).map((run) => {
     const last = latestStep(run);
-    const stage = last?.observation.page.url ?? run.finalPage.url;
+    const stage = last?.stageLabel ?? last?.observation.page.url ?? run.finalPage.url;
     const status = run.completed ? "completed" : "failed";
 
     return {
@@ -390,6 +397,52 @@ export function computeEfi(agentRuns: AgentRunResultLike[]): EfiBreakdown {
 }
 
 function buildFunnel(agentRuns: AgentRunResultLike[]): FunnelStage[] {
+  const stageStats = new Map<string, { reached: number; firstIndices: number[] }>();
+
+  for (const run of agentRuns) {
+    const seen = new Set<string>();
+
+    for (const step of run.steps) {
+      const label = step.stageLabel?.trim();
+
+      if (!label || seen.has(label)) {
+        continue;
+      }
+
+      seen.add(label);
+      const stats = stageStats.get(label) ?? { reached: 0, firstIndices: [] };
+      stats.reached += 1;
+      stats.firstIndices.push(step.step);
+      stageStats.set(label, stats);
+    }
+  }
+
+  if (stageStats.size > 0) {
+    const orderedStages = [...stageStats.entries()]
+      .sort((left, right) => average(left[1].firstIndices) - average(right[1].firstIndices))
+      .map(([label, stats]) => ({ label, reached: stats.reached }));
+    let previousReached = agentRuns.length;
+    const funnel = orderedStages.map((stage) => {
+      const dropped = Math.max(previousReached - stage.reached, 0);
+      const entry = {
+        name: stage.label,
+        total: previousReached,
+        completed: stage.reached,
+        dropped,
+      };
+      previousReached = Math.min(previousReached, stage.reached);
+      return entry;
+    });
+    const completed = agentRuns.filter((run) => run.completed).length;
+    funnel.push({
+      name: "Goal complete",
+      total: previousReached,
+      completed,
+      dropped: Math.max(previousReached - completed, 0),
+    });
+    return funnel;
+  }
+
   const total = agentRuns.length;
   const touched = agentRuns.filter((run) => run.steps.length > 0).length;
   const progressed = agentRuns.filter((run) =>
@@ -426,8 +479,11 @@ function buildFailureClusters(agentRuns: AgentRunResultLike[]): FailureCluster[]
     existing.personas.push(run.persona.archetype);
 
     if (last) {
+      existing.reasons.push(last.failureReason ?? "");
+      existing.reasons.push(last.readableDetail ?? "");
       existing.reasons.push(last.observation.summary);
       existing.reasons.push(last.action.details);
+      existing.reasons.push(...(last.visibleBlockers ?? []));
     }
 
     groups.set(classification.signature, existing);
@@ -450,9 +506,10 @@ function buildHighlightReel(agentRuns: AgentRunResultLike[]): string[] {
     .slice(0, 3)
     .map((run) => {
       const peak = max(run.steps.map((step) => step.frustration));
+      const last = latestStep(run);
       return `${run.agentId} (${run.persona.archetype}) peak frustration ${round(
         peak * 100,
-      )}% on ${run.config.goal}`;
+      )}% on ${run.config.goal}${last?.readableTitle ? ` - ${last.readableTitle}` : ""}`;
     });
 }
 

@@ -60,6 +60,13 @@ const messages = {
 
     "composer.scenario": "Scenario",
     "composer.runControls": "Run controls",
+    "composer.customMode": "Custom website",
+    "composer.customModeBody":
+      "Use any public URL and let the model compile a temporary scenario profile from the URL and mission before the swarm starts.",
+    "composer.customUrl": "Custom URL",
+    "composer.customGoal": "Custom goal",
+    "composer.customHint":
+      "When custom mode is enabled, the swarm ignores the preset demo card and generates a fresh AI scenario profile from your URL and goal.",
     "composer.goalOverride": "Goal override",
     "composer.agentCount": "Agent count",
     "composer.stepBudget": "Step budget",
@@ -393,13 +400,23 @@ const messages = {
   },
 } as const;
 
-export type TranslationKey = keyof typeof messages.en;
+export type TranslationKey = keyof typeof messages.en | keyof typeof messages.zh;
 
 type TranslationValues = Record<string, string | number>;
 
 const scenarioTranslations: Record<
   DemoScenarioId,
-  Omit<DemoScenarioDefinition, "recommendedMaxSteps" | "minimumMaxSteps" | "frames" | "id"> & {
+  Omit<
+    DemoScenarioDefinition,
+    | "recommendedMaxSteps"
+    | "minimumMaxSteps"
+    | "frames"
+    | "id"
+    | "inputSeeds"
+    | "domainAllowlist"
+    | "successDefinition"
+    | "aiHints"
+  > & {
     frames: Record<string, string>;
   }
 > = {
@@ -465,13 +482,16 @@ const scenarioTranslations: Record<
 };
 
 export function formatMessage(locale: Locale, key: TranslationKey, values?: TranslationValues) {
-  const template = messages[locale][key] ?? messages.en[key];
+  const template =
+    (messages[locale] as Partial<Record<TranslationKey, string>>)[key] ??
+    (messages.en as Partial<Record<TranslationKey, string>>)[key] ??
+    String(key);
 
   if (!values) {
     return template;
   }
 
-  return template.replace(/\{(\w+)\}/g, (_, token) => String(values[token] ?? `{${token}}`));
+  return template.replace(/\{(\w+)\}/g, (_: string, token: string) => String(values[token] ?? `{${token}}`));
 }
 
 export function localizeScenario(locale: Locale, scenario: DemoScenarioDefinition): DemoScenarioDefinition {

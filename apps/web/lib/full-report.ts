@@ -8,6 +8,7 @@ export interface PortableRunReport {
     id: string;
     scenarioId: RunRecord["scenarioId"];
     scenarioName: string;
+    scenarioProfile?: RunRecord["scenarioProfile"];
     status: RunRecord["status"];
     createdAt: string;
     completedAt: string | null;
@@ -54,11 +55,15 @@ function eventLine(event: RunRecord["events"][number]) {
 function stepLine(step: RunRecord["agentRuns"][number]["steps"][number]) {
   return [
     `- step ${step.step}`,
+    `title=${step.readableTitle ?? "n/a"}`,
+    `detail=${step.readableDetail ?? "n/a"}`,
     `decision=${step.decision.kind}`,
     `action=${step.action.kind}`,
     `ok=${step.action.ok}`,
     `frustration=${formatPercent(Math.round(step.frustration * 10000) / 100)}`,
     `confidence=${formatPercent(Math.round(step.confidence * 10000) / 100)}`,
+    `stage=${step.stageLabel ?? step.stageId ?? "unclassified"}`,
+    `goalStatus=${step.goalStatus ?? "unknown"}`,
     `execution=${step.action.execution?.mode ?? "none"}`,
     `url=${step.observation.page.url}`,
     `summary=${step.observation.summary}`,
@@ -73,6 +78,7 @@ export function buildPortableRunReport(record: RunRecord): PortableRunReport {
       id: record.id,
       scenarioId: record.scenarioId,
       scenarioName: record.scenarioName,
+      scenarioProfile: record.scenarioProfile,
       status: record.status,
       createdAt: record.createdAt,
       completedAt: record.completedAt,

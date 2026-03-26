@@ -1,7 +1,6 @@
 import type { AgentRunResult, PersonaArchetype } from "@chaos-swarm/agent-core";
 import type { ReportDocument } from "@chaos-swarm/reporting";
-import type { DemoScenarioId } from "./scenarios";
-
+import type { DemoScenarioDefinition } from "./scenarios";
 export interface TimelineEvent {
   id: string;
   agentId: string;
@@ -43,8 +42,9 @@ export interface RunRecord {
   status: "completed" | "queued" | "running" | "failed";
   createdAt: string;
   completedAt: string | null;
-  scenarioId: DemoScenarioId;
+  scenarioId: string;
   scenarioName: string;
+  scenarioProfile?: DemoScenarioDefinition | null;
   targetUrl: string;
   goal: string;
   agentCount: number;

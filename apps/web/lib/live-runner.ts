@@ -13,6 +13,7 @@ import type {
 } from "@chaos-swarm/agent-core";
 import { buildScenarioPlaybook } from "./agent-playbook";
 import {
+  assessStepOutcome,
   decideNextAction,
   type ObservedCandidate,
   type ParsedAgentDecision,
@@ -134,6 +135,27 @@ function buildAgentId(persona: AgentPersona, index: number) {
 
 function summarizeTargets(targets: string[]) {
   return targets.length ? targets.slice(0, 4).join(", ") : "no obvious targets";
+}
+
+function toObservedCandidates(candidates: InteractiveCandidate[]): ObservedCandidate[] {
+  return candidates.map<ObservedCandidate>((candidate) => ({
+    id: candidate.id,
+    text: candidate.text,
+    tagName: candidate.tagName,
+    inputType: candidate.inputType,
+    role: candidate.role,
+    placeholder: candidate.placeholder,
+    ariaLabel: candidate.ariaLabel,
+    href: candidate.href,
+    surfaceLabel: candidate.surfaceLabel,
+    viewportState: candidate.viewportState,
+    disabled: candidate.disabled,
+    selectOptions: candidate.selectOptions,
+    x: Math.round(candidate.x * 10) / 10,
+    y: Math.round(candidate.y * 10) / 10,
+    width: Math.round(candidate.width * 10) / 10,
+    height: Math.round(candidate.height * 10) / 10,
+  }));
 }
 
 function escapeRegExp(value: string) {
@@ -1145,19 +1167,6 @@ function stepIntent(decisionKind: Decision["kind"]): "load" | "scan" | "type" | 
   return "click";
 }
 
-function scenarioCompleted(scenario: DemoScenarioDefinition, finalPage: PageState) {
-  return scenario.id === "saucedemo"
-    ? /cart/.test(finalPage.url)
-    : scenario.id === "automationexercise"
-      ? /automationexercise\.com\/view_cart/.test(finalPage.url)
-      : scenario.id === "theinternet"
-        ? /the-internet\.herokuapp\.com\/secure/.test(finalPage.url) ||
-          finalPage.visibleTargets.some((target) => /logout/i.test(target))
-        : scenario.id === "expandtesting"
-          ? /practice\.expandtesting\.com\/form-confirmation/.test(finalPage.url)
-          : finalPage.visibleTargets.some((target) => /open new account|accounts overview|log out/i.test(target));
-}
-
 async function captureViewportDataUrl(page: Page) {
   const buffer = await page.screenshot({
     fullPage: false,
@@ -1188,7 +1197,6 @@ function normalizeModelDecision(
 }
 
 function buildDecisionGuardrailNotes(
-  scenario: DemoScenarioDefinition,
   pageState: PageState,
   steps: AgentStepRecord[],
   decision: ParsedAgentDecision,
@@ -1203,8 +1211,8 @@ function buildDecisionGuardrailNotes(
   ).toLowerCase();
   const lastStep = steps.at(-1);
 
-  if (decision.nextAction.kind === "stop" && !scenarioCompleted(scenario, pageState)) {
-    notes.push("Do not stop yet. The completion boundary is not visible on the current page.");
+  if (decision.nextAction.kind === "stop" && decision.goalStatus !== "complete") {
+    notes.push("Do not stop yet. The current page does not clearly satisfy the completion boundary.");
   }
 
   if (
@@ -1433,8 +1441,14 @@ async function appendStep(
   detail: string,
   callbacks: LiveSwarmCallbacks,
   explicitFlags: string[] = [],
+  progress?: Pick<AgentStepRecord, "goalStatus" | "stageId" | "stageLabel">,
+  pageStateOverride?: PageState,
+  readable?: Pick<
+    AgentStepRecord,
+    "readableTitle" | "readableDetail" | "successReason" | "failureReason" | "visibleBlockers"
+  >,
 ) {
-  const pageState = await snapshotPage(page, input.config.targetUrl, explicitFlags);
+  const pageState = pageStateOverride ?? (await snapshotPage(page, input.config.targetUrl, explicitFlags));
   const emotion = buildEmotion(input.persona, state, decision, action, pageState, pageState.errorFlags);
   state.frustration = emotion.frustration;
   state.confidence = emotion.confidence;
@@ -1448,6 +1462,14 @@ async function appendStep(
     },
     decision,
     action,
+    stageId: progress?.stageId ?? null,
+    stageLabel: progress?.stageLabel ?? null,
+    goalStatus: progress?.goalStatus ?? "in_progress",
+    readableTitle: readable?.readableTitle ?? null,
+    readableDetail: readable?.readableDetail ?? null,
+    successReason: readable?.successReason ?? null,
+    failureReason: readable?.failureReason ?? null,
+    visibleBlockers: readable?.visibleBlockers ?? [],
     frustration: state.frustration,
     confidence: state.confidence,
     timestamp: new Date().toISOString(),
@@ -1475,7 +1497,7 @@ async function runModelDrivenFlow(
 ) {
   await gotoWithRetry(page, input.config.targetUrl, { waitUntil: "domcontentloaded", timeout: 20_000 });
   await sleep(paceMs(input.persona, "load"));
-  const playbook = buildScenarioPlaybook(scenario, input.persona, input.config.seed ?? agentId);
+  const playbook = await buildScenarioPlaybook(scenario, input.persona, input.config.seed ?? agentId);
 
   while (steps.length < input.config.maxSteps) {
     await dismissInterruptingSurface(page);
@@ -1487,6 +1509,12 @@ async function runModelDrivenFlow(
       scenarioName: scenario.name,
       goal: input.config.goal,
       strictVisualMode: input.config.strictVisualMode ?? false,
+      frames: scenario.frames.map((frame) => ({
+        id: frame.id,
+        label: frame.label,
+        url: frame.url,
+        targets: frame.targets,
+      })),
       persona: input.persona,
       playbook,
       step: steps.length,
@@ -1505,31 +1533,13 @@ async function runModelDrivenFlow(
         loadState: pageState.loadState,
         visibleTargets: pageState.visibleTargets,
         errorFlags: pageState.errorFlags,
-        candidates: candidates.map<ObservedCandidate>((candidate) => ({
-          id: candidate.id,
-          text: candidate.text,
-          tagName: candidate.tagName,
-          inputType: candidate.inputType,
-          role: candidate.role,
-          placeholder: candidate.placeholder,
-          ariaLabel: candidate.ariaLabel,
-          href: candidate.href,
-          surfaceLabel: candidate.surfaceLabel,
-          viewportState: candidate.viewportState,
-          disabled: candidate.disabled,
-          selectOptions: candidate.selectOptions,
-          x: Math.round(candidate.x * 10) / 10,
-          y: Math.round(candidate.y * 10) / 10,
-          width: Math.round(candidate.width * 10) / 10,
-          height: Math.round(candidate.height * 10) / 10,
-        })),
+        candidates: toObservedCandidates(candidates),
       },
     } satisfies Parameters<typeof decideNextAction>[0];
 
     let { decision: modelDecision } = await decideNextAction(decisionContext);
     let targetCandidate = resolveCandidate(modelDecision, candidates);
     const guardrailNotes = buildDecisionGuardrailNotes(
-      scenario,
       pageState,
       steps,
       modelDecision,
@@ -1567,7 +1577,59 @@ async function runModelDrivenFlow(
     }
 
     await sleep(paceMs(input.persona, stepIntent(decision.kind)));
-    const nextPageState = await appendStep(
+    const nextPageState = await snapshotPage(page, input.config.targetUrl);
+    const nextCandidates = await extractInteractiveCandidates(page);
+    const nextScreenshotDataUrl = await captureViewportDataUrl(page);
+    const fallbackOutcome = {
+      currentStageId: modelDecision.currentStageId,
+      currentStageLabel: modelDecision.currentStageLabel,
+      goalStatus: modelDecision.goalStatus,
+      stepTitle: `${decision.kind[0]?.toUpperCase() ?? ""}${decision.kind.slice(1)} action`,
+      stepDetail: `${modelDecision.pageAssessment} ${action.details}`.trim(),
+      successReason: action.ok ? modelDecision.nextAction.rationale : null,
+      failureReason: action.ok ? null : action.details,
+      visibleBlockers: nextPageState.errorFlags.slice(0, 4),
+    };
+    const outcomeAssessment = await assessStepOutcome({
+      scenarioName: scenario.name,
+      goal: input.config.goal,
+      strictVisualMode: input.config.strictVisualMode ?? false,
+      frames: scenario.frames.map((frame) => ({
+        id: frame.id,
+        label: frame.label,
+        url: frame.url,
+        targets: frame.targets,
+      })),
+      persona: input.persona,
+      playbook,
+      step: steps.length,
+      recentHistory: steps.slice(-4).map((step) => ({
+        action: `${step.decision.kind} -> ${step.action.kind}`,
+        detail: step.readableDetail ?? step.action.details,
+        frustration: step.frustration,
+        confidence: step.confidence,
+      })),
+      previousAction: {
+        kind: decision.kind,
+        target: decision.target,
+        rationale: decision.rationale,
+        ok: action.ok,
+        details: action.details,
+      },
+      observation: {
+        screenshotDataUrl: nextScreenshotDataUrl,
+        url: nextPageState.url,
+        title: nextPageState.title,
+        loadState: nextPageState.loadState,
+        visibleTargets: nextPageState.visibleTargets,
+        errorFlags: nextPageState.errorFlags,
+        candidates: toObservedCandidates(nextCandidates),
+      },
+    })
+      .then((result) => result.outcome)
+      .catch(() => fallbackOutcome);
+
+    await appendStep(
       page,
       input,
       startedAt,
@@ -1576,15 +1638,29 @@ async function runModelDrivenFlow(
       state,
       decision,
       action,
-      `${modelDecision.pageAssessment} | ${modelDecision.nextAction.rationale}`,
+      outcomeAssessment.stepDetail,
       callbacks,
+      [],
+      {
+        stageId: outcomeAssessment.currentStageId,
+        stageLabel: outcomeAssessment.currentStageLabel,
+        goalStatus: outcomeAssessment.goalStatus,
+      },
+      nextPageState,
+      {
+        readableTitle: outcomeAssessment.stepTitle,
+        readableDetail: outcomeAssessment.stepDetail,
+        successReason: outcomeAssessment.successReason,
+        failureReason: outcomeAssessment.failureReason,
+        visibleBlockers: outcomeAssessment.visibleBlockers,
+      },
     );
 
     if (
       !action.ok ||
       decision.kind === "stop" ||
       decision.kind === "escalate" ||
-      scenarioCompleted(scenario, nextPageState)
+      outcomeAssessment.goalStatus === "complete"
     ) {
       return;
     }
@@ -1720,7 +1796,7 @@ async function runLiveAgent(
     await runModelDrivenFlow(page, scenario, input, startedAt, agentId, steps, state, callbacks);
 
     finalPage = await snapshotPage(page, input.config.targetUrl);
-    const completed = scenarioCompleted(scenario, finalPage);
+    const completed = steps.at(-1)?.goalStatus === "complete";
 
     return buildRunningSnapshot(
       input,
@@ -1763,6 +1839,11 @@ async function runLiveAgent(
         action.details,
         callbacks,
         finalPage.errorFlags,
+        {
+          goalStatus: "blocked",
+          stageId: null,
+          stageLabel: null,
+        },
       );
     }
 

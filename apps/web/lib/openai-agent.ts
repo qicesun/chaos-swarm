@@ -37,6 +37,12 @@ export interface ScenarioDecisionContext {
   scenarioName: string;
   goal: string;
   strictVisualMode: boolean;
+  frames: Array<{
+    id: string;
+    label: string;
+    url: string;
+    targets: string[];
+  }>;
   persona: AgentPersona;
   playbook: {
     mission: string;
@@ -56,8 +62,44 @@ export interface ScenarioDecisionContext {
   observation: AiObservationInput;
 }
 
+export interface StepOutcomeContext {
+  scenarioName: string;
+  goal: string;
+  strictVisualMode: boolean;
+  frames: Array<{
+    id: string;
+    label: string;
+    url: string;
+    targets: string[];
+  }>;
+  persona: AgentPersona;
+  playbook: {
+    mission: string;
+    allowedValues: Record<string, string>;
+    completionHints: string[];
+    safetyRules: string[];
+  };
+  step: number;
+  recentHistory: Array<{
+    action: string;
+    detail: string;
+    frustration: number;
+    confidence: number;
+  }>;
+  previousAction: {
+    kind: string;
+    target?: string;
+    rationale: string;
+    ok: boolean;
+    details: string;
+  };
+  observation: AiObservationInput;
+}
+
 const decisionSchema = z.object({
   pageAssessment: z.string().min(1).max(280),
+  currentStageId: z.string().nullable(),
+  currentStageLabel: z.string().nullable(),
   goalStatus: z.enum(["not_started", "in_progress", "blocked", "complete"]),
   nextAction: z.object({
     kind: z.enum(["click", "fill_form", "scroll", "wait", "retry", "stop", "escalate"]),
@@ -80,6 +122,19 @@ const decisionSchema = z.object({
 });
 
 export type ParsedAgentDecision = z.infer<typeof decisionSchema>;
+
+const outcomeSchema = z.object({
+  currentStageId: z.string().nullable(),
+  currentStageLabel: z.string().nullable(),
+  goalStatus: z.enum(["not_started", "in_progress", "blocked", "complete"]),
+  stepTitle: z.string().min(1).max(140),
+  stepDetail: z.string().min(1).max(260),
+  successReason: z.string().nullable(),
+  failureReason: z.string().nullable(),
+  visibleBlockers: z.array(z.string().min(1).max(160)).max(4),
+});
+
+export type ParsedStepOutcome = z.infer<typeof outcomeSchema>;
 
 let cachedClient: OpenAI | null = null;
 
@@ -116,7 +171,7 @@ export async function decideNextAction(context: ScenarioDecisionContext) {
       format: zodTextFormat(decisionSchema, "chaos_swarm_next_action"),
     },
     instructions:
-      "You are the decision engine for a browser-testing AI agent. Operate like a careful human looking at the screenshot, not like a DOM scraper. The candidate list is a screen-space overlay of nearby controls: each candidate has a stable id, label, role, screen box, and a viewportState that tells you whether it is visible now, above the fold, or below the fold. Choose the single safest next action to advance the goal. Ground every action in the provided candidate list, and use exact candidate ids like c1, c2, c3 in targetId/fields whenever possible. Use fill_form when multiple visible fields on the same surface should be completed together, especially on dense registration or validation forms. Never invent controls, credentials, or pages outside the playbook. If multiple forms or panels are visible, use the screenshot plus candidate surface labels and positions to choose the surface that matches the mission; ignore unrelated sidebars, login widgets, or auxiliary forms. If validator notes are present, treat them as hard constraints on your next move. If strictVisualMode is true, prefer large visible controls and lower-risk scrolls over tiny ambiguous targets because there is no DOM recovery path. If the exact control named in the goal is not visible yet but appears below_fold or above_fold in the candidate list, prefer scrolling toward it instead of clicking a merely similar control. If recent history shows that the same click was attempted on the same page and the page did not materially change, do not repeat the same click again; choose a different safe action such as scroll, wait, or a more specific navigation control. If recent history shows that a field was already filled and the page has not changed, do not fill it again; prefer the next visible submit, search, continue, register, login, or navigation control. If recent history shows a successful add-to-cart or the page now shows Remove, Shopping Cart, View Cart, Cart, or similar in-cart state, do not click another add-to-cart button; move toward the cart or checkout boundary instead. A filled but unsubmitted form is not a completed task. Only choose stop when the current page itself satisfies the completion hints right now. Prefer progress, but escalate if the page is blocked, broken, or no safe move exists. Return null for any targetId, targetText, inputText, scrollDirection, or fields entry that does not apply; do not omit keys.",
+      "You are the decision engine for a browser-testing AI agent. Operate like a careful human looking at the screenshot, not like a DOM scraper. The candidate list is a screen-space overlay of nearby controls: each candidate has a stable id, label, role, screen box, and a viewportState that tells you whether it is visible now, above the fold, or below the fold. The scenario also includes funnel stages; choose the single best matching currentStageId/currentStageLabel from that list when possible instead of inventing your own stage names. Choose the single safest next action to advance the goal. Ground every action in the provided candidate list, and use exact candidate ids like c1, c2, c3 in targetId/fields whenever possible. Use fill_form when multiple visible fields on the same surface should be completed together, especially on dense registration or validation forms. Never invent controls, credentials, or pages outside the playbook. If multiple forms or panels are visible, use the screenshot plus candidate surface labels and positions to choose the surface that matches the mission; ignore unrelated sidebars, login widgets, or auxiliary forms. If validator notes are present, treat them as hard constraints on your next move. If strictVisualMode is true, prefer large visible controls and lower-risk scrolls over tiny ambiguous targets because there is no DOM recovery path. If the exact control named in the goal is not visible yet but appears below_fold or above_fold in the candidate list, prefer scrolling toward it instead of clicking a merely similar control. If recent history shows that the same click was attempted on the same page and the page did not materially change, do not repeat the same click again; choose a different safe action such as scroll, wait, or a more specific navigation control. If recent history shows that a field was already filled and the page has not changed, do not fill it again; prefer the next visible submit, search, continue, register, login, or navigation control. If recent history shows a successful add-to-cart or the page now shows Remove, Shopping Cart, View Cart, Cart, or similar in-cart state, do not click another add-to-cart button; move toward the cart or checkout boundary instead. A filled but unsubmitted form is not a completed task. Set goalStatus to complete only when the current page itself satisfies the completion hints right now. Prefer progress, but escalate if the page is blocked, broken, or no safe move exists. Return null for any targetId, targetText, inputText, scrollDirection, or fields entry that does not apply; do not omit keys.",
     input: [
       {
         role: "user",
@@ -128,6 +183,7 @@ export async function decideNextAction(context: ScenarioDecisionContext) {
                 scenario: context.scenarioName,
                 goal: context.goal,
                 strictVisualMode: context.strictVisualMode,
+                frames: context.frames,
                 persona: summarizePersona(context.persona),
                 mission: context.playbook.mission,
                 allowedValues: context.playbook.allowedValues,
@@ -167,6 +223,69 @@ export async function decideNextAction(context: ScenarioDecisionContext) {
 
   return {
     decision: response.output_parsed,
+    usage: response.usage,
+    responseId: response.id,
+  };
+}
+
+export async function assessStepOutcome(context: StepOutcomeContext) {
+  const client = getClient();
+  const response = await client.responses.parse({
+    model: env.agentModel,
+    text: {
+      format: zodTextFormat(outcomeSchema, "chaos_swarm_step_outcome"),
+    },
+    instructions:
+      "You analyze the resulting page after a browser-testing AI agent took an action. Choose the single best matching currentStageId/currentStageLabel from the provided frames when possible. Decide whether the goal is not_started, in_progress, blocked, or complete based on what is visible on the current page right now. stepTitle should be a short plain-language summary a product person can read quickly. stepDetail should explain what happened and why, using the visible page state rather than internal automation jargon. successReason should explain why the action helped when there is clear progress. failureReason should explain the main blocker when the action failed or the page is visibly blocked. visibleBlockers should list the most important visible obstacles, errors, or ambiguities. Do not invent hidden state. If the task is truly complete, say so only when the completion hints are visibly satisfied on the current page.",
+    input: [
+      {
+        role: "user",
+        content: [
+          {
+            type: "input_text",
+            text: JSON.stringify(
+              {
+                scenario: context.scenarioName,
+                goal: context.goal,
+                strictVisualMode: context.strictVisualMode,
+                frames: context.frames,
+                persona: summarizePersona(context.persona),
+                mission: context.playbook.mission,
+                completionHints: context.playbook.completionHints,
+                safetyRules: context.playbook.safetyRules,
+                step: context.step,
+                previousAction: context.previousAction,
+                page: {
+                  url: context.observation.url,
+                  title: context.observation.title,
+                  loadState: context.observation.loadState,
+                  visibleTargets: context.observation.visibleTargets,
+                  errorFlags: context.observation.errorFlags,
+                },
+                candidates: context.observation.candidates,
+                recentHistory: context.recentHistory,
+              },
+              null,
+              2,
+            ),
+          },
+          {
+            type: "input_image",
+            image_url: context.observation.screenshotDataUrl,
+            detail: "low",
+          },
+        ],
+      },
+    ],
+    user: `chaos-swarm-outcome:${context.scenarioName}:${context.step}`,
+  });
+
+  if (!response.output_parsed) {
+    throw new Error("Model outcome parsing failed: no structured outcome was returned.");
+  }
+
+  return {
+    outcome: response.output_parsed,
     usage: response.usage,
     responseId: response.id,
   };

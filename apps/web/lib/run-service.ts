@@ -6,7 +6,8 @@ import { canUseBrowserbase, env } from "./env";
 import { runLiveSwarm } from "./live-runner";
 import { getPersistenceMode, loadRunRecord, persistRunRecord } from "./persistence";
 import { applyReadableReport, enhanceReadableReport } from "./report-llm";
-import { getScenario, listScenarios, type DemoScenarioDefinition } from "./scenarios";
+import { compileScenarioProfile } from "./scenario-compiler";
+import { getScenario, hasScenario, listScenarios, type DemoScenarioDefinition } from "./scenarios";
 import { upsertRunInStore } from "./store";
 import type { PersonaSnapshot, RunRecord, StageSnapshot, TimelineEvent } from "./types";
 
@@ -17,8 +18,23 @@ const createRunSchema = z.object({
   maxSteps: z.number().int().min(2).max(12).default(5),
   strictVisualMode: z.boolean().default(false),
   demoScenario: z
-    .enum(["saucedemo", "automationexercise", "theinternet", "expandtesting", "parabank"])
-    .default("saucedemo"),
+    .string()
+    .optional(),
+  inputSeeds: z.record(z.string(), z.string()).optional(),
+}).superRefine((value, ctx) => {
+  if (value.demoScenario && hasScenario(value.demoScenario)) {
+    return;
+  }
+
+  if (value.targetUrl && value.goal) {
+    return;
+  }
+
+  ctx.addIssue({
+    code: z.ZodIssueCode.custom,
+    message: "Provide a known demoScenario or a targetUrl + goal pair for AI scenario compilation.",
+    path: ["demoScenario"],
+  });
 });
 
 const activeJobs = new Map<string, Promise<void>>();
@@ -39,6 +55,10 @@ function titleCase(value: string) {
 }
 
 function describeStepTitle(step: AgentRunResult["steps"][number], stageLabel: string | null) {
+  if (step.readableTitle) {
+    return step.readableTitle;
+  }
+
   const target = step.decision.target ?? "";
 
   if (stageLabel && step.action.ok && (step.decision.kind === "wait" || step.decision.kind === "click")) {
@@ -117,10 +137,19 @@ function describeStepTitle(step: AgentRunResult["steps"][number], stageLabel: st
 }
 
 function describeStepDetail(step: AgentRunResult["steps"][number]) {
+  if (step.readableDetail) {
+    const reason = step.action.ok ? step.successReason : step.failureReason;
+    return reason ? `${step.readableDetail} Reason: ${reason}` : step.readableDetail;
+  }
+
   return step.action.details || step.observation.summary;
 }
 
 function getStageLabelForStep(step: AgentRunResult["steps"][number], scenario: DemoScenarioDefinition) {
+  if (step.stageLabel) {
+    return step.stageLabel;
+  }
+
   const matchedStage = scenario.frames.find((stage) =>
     stageMatched(
       {
@@ -211,81 +240,46 @@ function buildPersonaSummary(agentRuns: AgentRunResult[]): PersonaSnapshot[] {
 
 function stageMatched(run: AgentRunResult, scenario: DemoScenarioDefinition, stage: DemoScenarioDefinition["frames"][number]) {
   const stagePath = new URL(stage.url).pathname;
+  const stageTargetTokens = stage.targets.map((target) => target.toLowerCase());
+  const stageDescriptionTokens = (stage.description ?? "")
+    .toLowerCase()
+    .split(/[^a-z0-9]+/g)
+    .filter((token) => token.length >= 4);
 
   return run.steps.some((step) => {
+    if (step.stageId === stage.id || step.stageLabel === stage.label) {
+      return true;
+    }
+
     const stepUrl = step.observation.page.url;
 
-    if (scenario.id === "saucedemo") {
-      if (stage.id === "login") {
-        return /saucedemo\.com\/?$/.test(stepUrl) || /login/i.test(step.observation.summary);
-      }
-
-      if (stage.id === "inventory") {
-        return /inventory/.test(stepUrl);
-      }
-
-      if (stage.id === "cart") {
-        return /cart/.test(stepUrl);
-      }
-    }
-
-    if (scenario.id === "automationexercise") {
-      if (stage.id === "catalog") {
-        return /automationexercise\.com\/products\/?$/.test(stepUrl);
-      }
-
-      if (stage.id === "search-results") {
-        return /automationexercise\.com\/products\?search=/.test(stepUrl);
-      }
-
-      if (stage.id === "product-detail") {
-        return /automationexercise\.com\/product_details\//.test(stepUrl);
-      }
-
-      if (stage.id === "cart-review") {
-        return /automationexercise\.com\/view_cart/.test(stepUrl);
-      }
-    }
-
-    if (scenario.id === "theinternet") {
-      if (stage.id === "directory") {
-        return step.step === 0 || /the-internet\.herokuapp\.com\/?$/.test(stepUrl);
-      }
-
-      if (stage.id === "auth-form") {
-        return /the-internet\.herokuapp\.com\/login/.test(stepUrl);
-      }
-
-      if (stage.id === "secure-area") {
-        return /the-internet\.herokuapp\.com\/secure/.test(stepUrl);
-      }
-    }
-
-    if (scenario.id === "expandtesting") {
-      if (stage.id === "validation-form") {
-        return /practice\.expandtesting\.com\/form-validation/.test(stepUrl);
-      }
-
-      if (stage.id === "confirmation") {
-        return /practice\.expandtesting\.com\/form-confirmation/.test(stepUrl);
-      }
-    }
-
-    if (scenario.id === "parabank") {
-      if (stage.id === "registration-form") {
-        return (
-          /parabank\.parasoft\.com\/parabank\/register\.htm/.test(stepUrl) &&
-          step.observation.page.visibleTargets.some((target) => /register/i.test(target))
-        );
-      }
-
-      if (stage.id === "account-services") {
-        return step.observation.page.visibleTargets.some((target) => /open new account|accounts overview|log out/i.test(target));
-      }
-    }
-
     if (stagePath !== "/") {
-      return stepUrl.includes(stagePath);
+      if (stepUrl.includes(stagePath)) {
+        return true;
+      }
+    }
+
+    const surfaceText = [
+      step.observation.page.title,
+      step.observation.summary,
+      ...step.observation.page.visibleTargets,
+      step.readableDetail,
+      step.readableTitle,
+    ]
+      .filter(Boolean)
+      .join(" | ")
+      .toLowerCase();
+
+    if (stageTargetTokens.some((token) => surfaceText.includes(token))) {
+      return true;
+    }
+
+    if (stageDescriptionTokens.some((token) => surfaceText.includes(token))) {
+      return true;
+    }
+
+    if (stagePath === "/" && step.step === 0) {
+      return scenario.domainAllowlist.some((domain) => stepUrl.includes(domain));
     }
 
     return false;
@@ -546,7 +540,18 @@ interface CreatedRun {
 
 export async function createRun(input: unknown) {
   const payload = createRunSchema.parse(input);
-  const scenario = getScenario(payload.demoScenario);
+  const scenario =
+    payload.demoScenario && hasScenario(payload.demoScenario)
+      ? getScenario(payload.demoScenario)
+      : await compileScenarioProfile({
+          targetUrl: payload.targetUrl!,
+          goal: payload.goal!,
+          inputSeeds: payload.inputSeeds,
+        });
+
+  if (!scenario) {
+    throw new Error(`Unknown demo scenario "${payload.demoScenario}".`);
+  }
   const runId = randomUUID();
   const personas = selectPersonas(payload.agentCount);
   const maxSteps = Math.max(payload.maxSteps, scenario.minimumMaxSteps);
@@ -556,8 +561,9 @@ export async function createRun(input: unknown) {
     status: "queued",
     createdAt: now,
     completedAt: null,
-    scenarioId: payload.demoScenario,
+    scenarioId: payload.demoScenario && hasScenario(payload.demoScenario) ? payload.demoScenario : scenario.id,
     scenarioName: scenario.name,
+    scenarioProfile: scenario,
     targetUrl: payload.targetUrl ?? scenario.targetUrl,
     goal: payload.goal ?? scenario.goal,
     agentCount: payload.agentCount,
@@ -587,6 +593,10 @@ export async function createRun(input: unknown) {
     record.warnings.push(
       `Step budget raised from ${payload.maxSteps} to ${maxSteps} to satisfy the ${scenario.siteLabel} scenario floor.`,
     );
+  }
+
+  if (!payload.demoScenario || !hasScenario(payload.demoScenario)) {
+    record.warnings.push("This run is using an AI-compiled scenario profile generated from the supplied URL and goal.");
   }
 
   upsertRunInStore(record);

@@ -2,7 +2,7 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import type { AgentRunResult, LoadState, PersonaArchetype } from "@chaos-swarm/agent-core";
 import { buildReport, type ReportDocument } from "@chaos-swarm/reporting";
 import { env } from "./env";
-import { scenarioCatalog, type DemoScenarioId } from "./scenarios";
+import { scenarioCatalog } from "./scenarios";
 import { getRunFromStore, upsertRunInStore } from "./store";
 import type { PersonaSnapshot, RunRecord, StageSnapshot, TimelineEvent } from "./types";
 
@@ -206,7 +206,7 @@ function buildPersonaSummary(agents: AgentRow[]): PersonaSnapshot[] {
 }
 
 function buildStageSummary(scenarioId: string): StageSnapshot[] {
-  const scenario = scenarioCatalog[scenarioId as DemoScenarioId];
+  const scenario = scenarioCatalog[scenarioId];
 
   if (!scenario) {
     return [];
@@ -394,14 +394,14 @@ function buildRecoveredRunRecord(run: RunRow, agents: AgentRow[], events: EventR
   const agentRuns = recoverAgentRuns(run, agents, events, strictVisualMode);
   const report = reportRow?.report_json ?? buildRecoveredReport(run, agentRuns, strictVisualMode);
   const summary = toRecordSummary(run.summary, agents);
-  const scenario = scenarioCatalog[run.scenario_id as DemoScenarioId];
+  const scenario = scenarioCatalog[run.scenario_id];
 
   return {
     id: run.run_id,
     status: run.status,
     createdAt: run.created_at,
     completedAt: run.completed_at,
-    scenarioId: run.scenario_id as DemoScenarioId,
+    scenarioId: run.scenario_id,
     scenarioName: scenario?.name ?? titleCase(run.scenario_id),
     targetUrl: run.target_url,
     goal: run.goal,

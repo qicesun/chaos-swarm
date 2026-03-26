@@ -6,8 +6,8 @@ import { env } from "./env";
 import type { RunRecord } from "./types";
 
 const localizedCopySchema = z.object({
-  en: z.string().min(1).max(420),
-  zh: z.string().min(1).max(420),
+  en: z.string().min(1).max(1200),
+  zh: z.string().min(1).max(1200),
 });
 
 const readableReportSchema = z.object({
@@ -17,13 +17,13 @@ const readableReportSchema = z.object({
       title: localizedCopySchema,
       body: localizedCopySchema,
     }),
-  ).max(4),
+  ).max(6),
   findings: z.array(
     z.object({
       title: localizedCopySchema,
       body: localizedCopySchema,
     }),
-  ).max(4),
+  ).max(6),
   agentStories: z.array(
     z.object({
       agentId: z.string(),
@@ -31,7 +31,7 @@ const readableReportSchema = z.object({
       status: z.enum(["completed", "failed"]),
       summary: localizedCopySchema,
     }),
-  ).max(4),
+  ).max(6),
 });
 
 let cachedClient: OpenAI | null = null;

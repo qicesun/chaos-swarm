@@ -128,6 +128,14 @@ export interface AgentStepRecordLike {
       reason?: string;
     };
   };
+  stageId?: string | null;
+  stageLabel?: string | null;
+  goalStatus?: "not_started" | "in_progress" | "blocked" | "complete";
+  readableTitle?: string | null;
+  readableDetail?: string | null;
+  successReason?: string | null;
+  failureReason?: string | null;
+  visibleBlockers?: string[];
   frustration: number;
   confidence: number;
   timestamp: string;

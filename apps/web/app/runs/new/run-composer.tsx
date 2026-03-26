@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useTranslations } from "@/components/locale-provider";
 import { localizeScenario } from "@/lib/i18n";
-import type { DemoScenarioDefinition, DemoScenarioId } from "@/lib/scenarios";
+import type { DemoScenarioDefinition } from "@/lib/scenarios";
 
 interface RunComposerProps {
   scenarios: DemoScenarioDefinition[];
@@ -18,7 +18,10 @@ export function RunComposer({ scenarios }: RunComposerProps) {
   const initialScenario = scenarios[0];
   const requestedScenarioId = searchParams.get("scenario");
   const requestedScenario = scenarios.find((scenario) => scenario.id === requestedScenarioId);
-  const [scenarioId, setScenarioId] = useState<DemoScenarioId>(requestedScenario?.id ?? initialScenario?.id ?? "saucedemo");
+  const [scenarioId, setScenarioId] = useState<string>(requestedScenario?.id ?? initialScenario?.id ?? "saucedemo");
+  const [useCustomScenario, setUseCustomScenario] = useState(false);
+  const [customTargetUrl, setCustomTargetUrl] = useState("");
+  const [customGoal, setCustomGoal] = useState("");
   const [agentCount, setAgentCount] = useState(12);
   const [maxSteps, setMaxSteps] = useState(initialScenario?.recommendedMaxSteps ?? 6);
   const [goal, setGoal] = useState("");
@@ -39,12 +42,12 @@ export function RunComposer({ scenarios }: RunComposerProps) {
   );
 
   useEffect(() => {
-    if (!selectedScenario) {
+    if (!selectedScenario || useCustomScenario) {
       return;
     }
 
     setMaxSteps(selectedScenario.recommendedMaxSteps);
-  }, [selectedScenario]);
+  }, [selectedScenario, useCustomScenario]);
 
   useEffect(() => {
     if (!requestedScenario || requestedScenario.id === scenarioId) {
@@ -58,6 +61,11 @@ export function RunComposer({ scenarios }: RunComposerProps) {
   async function launchRun() {
     setError(null);
 
+    if (useCustomScenario && (!customTargetUrl.trim() || !customGoal.trim())) {
+      setError(t("composer.runCreationFailed"));
+      return;
+    }
+
     try {
       const response = await fetch("/api/runs", {
         method: "POST",
@@ -65,12 +73,12 @@ export function RunComposer({ scenarios }: RunComposerProps) {
           "content-type": "application/json",
         },
         body: JSON.stringify({
-          demoScenario: scenarioId,
+          demoScenario: useCustomScenario ? undefined : scenarioId,
           agentCount,
           maxSteps,
           strictVisualMode,
-          goal: goal.trim() || selectedScenario.goal,
-          targetUrl: selectedScenario.targetUrl,
+          goal: useCustomScenario ? customGoal.trim() : goal.trim() || selectedScenario.goal,
+          targetUrl: useCustomScenario ? customTargetUrl.trim() : selectedScenario.targetUrl,
         }),
       });
 
@@ -130,6 +138,52 @@ export function RunComposer({ scenarios }: RunComposerProps) {
       <div className="panel-strong rounded-[2rem] p-7">
         <p className="text-sm uppercase tracking-[0.25em] text-[var(--muted)]">{t("composer.runControls")}</p>
         <div className="mt-5 space-y-5">
+          <label className="flex cursor-pointer items-start gap-4 rounded-[1.5rem] border border-[var(--line)] bg-white/60 p-5">
+            <input
+              type="checkbox"
+              checked={useCustomScenario}
+              onChange={(event) => {
+                const enabled = event.target.checked;
+                setUseCustomScenario(enabled);
+                if (enabled) {
+                  setMaxSteps(6);
+                } else if (selectedScenario) {
+                  setMaxSteps(selectedScenario.recommendedMaxSteps);
+                }
+              }}
+              className="mt-1 h-5 w-5 accent-[var(--accent)]"
+            />
+            <div>
+              <p className="text-sm uppercase tracking-[0.18em] text-[var(--muted)]">{t("composer.customMode")}</p>
+              <p className="mt-2 text-sm leading-7 text-[var(--muted)]">{t("composer.customModeBody")}</p>
+              <p className="mt-2 text-xs leading-6 text-[var(--muted)]">{t("composer.customHint")}</p>
+            </div>
+          </label>
+
+          {useCustomScenario ? (
+            <>
+              <label className="block">
+                <span className="text-sm font-semibold">{t("composer.customUrl")}</span>
+                <input
+                  value={customTargetUrl}
+                  onChange={(event) => setCustomTargetUrl(event.target.value)}
+                  placeholder="https://example.com"
+                  className="mt-2 w-full rounded-[1.25rem] border border-[var(--line)] bg-white/75 px-4 py-3 outline-none transition focus:border-[var(--accent)]"
+                />
+              </label>
+
+              <label className="block">
+                <span className="text-sm font-semibold">{t("composer.customGoal")}</span>
+                <textarea
+                  value={customGoal}
+                  onChange={(event) => setCustomGoal(event.target.value)}
+                  placeholder="Find the pricing page and open a plan comparison."
+                  className="mt-2 min-h-24 w-full rounded-[1.25rem] border border-[var(--line)] bg-white/75 px-4 py-3 outline-none transition focus:border-[var(--accent)]"
+                />
+              </label>
+            </>
+          ) : null}
+
           <label className="block">
             <span className="text-sm font-semibold">{t("composer.goalOverride")}</span>
             <textarea
@@ -164,17 +218,19 @@ export function RunComposer({ scenarios }: RunComposerProps) {
             <input
               className="mt-2 w-full accent-[var(--accent)]"
               type="range"
-              min={selectedScenario.minimumMaxSteps}
+              min={useCustomScenario ? 4 : selectedScenario.minimumMaxSteps}
               max={10}
               step={1}
               value={maxSteps}
               onChange={(event) => setMaxSteps(Number(event.target.value))}
             />
             <p className="mt-2 text-xs leading-6 text-[var(--muted)]">
-              {t("composer.recommendedSteps", {
-                recommended: selectedScenario.recommendedMaxSteps,
-                minimum: selectedScenario.minimumMaxSteps,
-              })}
+              {useCustomScenario
+                ? "Recommended 6 steps. AI-compiled scenarios keep a minimum of 4 steps so the swarm can establish and verify a goal path."
+                : t("composer.recommendedSteps", {
+                    recommended: selectedScenario.recommendedMaxSteps,
+                    minimum: selectedScenario.minimumMaxSteps,
+                  })}
             </p>
           </label>
         </div>
