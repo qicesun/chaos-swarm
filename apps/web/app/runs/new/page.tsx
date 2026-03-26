@@ -8,9 +8,9 @@ export default function NewRunPage() {
         <p className="text-sm uppercase tracking-[0.3em] text-[var(--muted)]">Launch a swarm</p>
         <h1 className="mt-4 text-5xl font-semibold tracking-[-0.05em]">Configure the first chaos run.</h1>
         <p className="mt-4 max-w-3xl text-lg leading-8 text-[var(--muted)]">
-          Pick one of the seeded public targets, choose swarm size, and launch a live local Playwright swarm. This
-          build streams progress in-memory now and can be promoted to Browserbase / Trigger.dev once cloud orchestration
-          is wired in.
+          Pick one of the seeded public targets across commerce, auth, forms, and banking, then launch a live local
+          Playwright swarm. This build streams progress in-memory now and can be promoted to Browserbase / Trigger.dev
+          once cloud orchestration is wired in.
         </p>
       </section>
 

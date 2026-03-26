@@ -130,7 +130,7 @@ async function extractVisibleTargets(page: Page): Promise<string[]> {
             return label.replace(/\s+/g, " ").trim();
           })
           .filter(Boolean)
-          .slice(0, 10),
+          .slice(0, 20),
       );
   } catch {
     return [];
@@ -225,18 +225,6 @@ async function clickWithFallback(page: Page, label: string, candidates: Array<()
   }
 
   throw lastError ?? new Error(`Unable to locate ${label}`);
-}
-
-async function selectMagentoOption(page: Page, dimension: "size" | "color") {
-  const selector =
-    dimension === "size"
-      ? ".swatch-attribute.size .swatch-option"
-      : ".swatch-attribute.color .swatch-option";
-
-  return clickWithFallback(page, `${dimension} option`, [
-    () => page.locator(selector),
-    () => page.locator(`[option-label][data-option-type='${dimension === "size" ? "0" : "1"}']`),
-  ]);
 }
 
 function buildEmotion(
@@ -566,7 +554,7 @@ async function runSaucedemoFlow(
   );
 }
 
-async function runMagentoFlow(
+async function runAutomationExerciseFlow(
   page: Page,
   input: AgentRunInput,
   startedAt: string,
@@ -587,265 +575,31 @@ async function runMagentoFlow(
     state,
     {
       kind: "wait",
-      rationale: "the agent waits for the Magento home page to settle",
+      rationale: "the agent waits for the catalog surface to settle before searching",
     },
     {
       kind: "wait",
       ok: true,
-      details: "loaded the storefront landing page",
+      details: "loaded the Automation Exercise products catalog",
     },
-    "search entry is visible",
+    "catalog and search entry are visible",
     callbacks,
   );
 
   await assertUsableSurface(page);
-
-  await maybeScan(page, input, startedAt, agentId, steps, state, callbacks, "paused to scan the storefront chrome");
+  await maybeScan(page, input, startedAt, agentId, steps, state, callbacks, "paused to scan the product grid and search affordances");
 
   if (steps.length >= input.config.maxSteps) {
     return;
   }
 
-  await page.locator("#search").fill("Radiant Tee");
+  await page.locator("#search_product").fill("Blue Top");
   await sleep(paceMs(input.persona, "type"));
-  await page.locator("#search").press("Enter");
-  await page.waitForURL(/catalogsearch\/result/, { timeout: 15_000 });
-  await sleep(paceMs(input.persona, "click"));
-
-  await appendStep(
-    page,
-    input,
-    startedAt,
-    agentId,
-    steps,
-    state,
-    {
-      kind: "type",
-      rationale: "the top search box is the fastest route to the target product",
-      target: "search",
-      value: "Radiant Tee",
-    },
-    {
-      kind: "type",
-      ok: true,
-      details: "searched for the target product",
-    },
-    "results grid is now visible",
-    callbacks,
-  );
-
-  if (steps.length >= input.config.maxSteps) {
-    return;
-  }
-
-  await clickWithFallback(page, "Radiant Tee", [
-    () => page.getByRole("link", { name: /Radiant Tee/i }),
-    () => page.locator("a.product-item-link"),
+  await clickWithFallback(page, "search submit", [
+    () => page.locator("#submit_search"),
+    () => page.getByRole("button", { name: /search/i }),
   ]);
-  await page.waitForURL(/radiant-tee/, { timeout: 15_000 });
-  await sleep(paceMs(input.persona, "click"));
-
-  await appendStep(
-    page,
-    input,
-    startedAt,
-    agentId,
-    steps,
-    state,
-    {
-      kind: "click",
-      rationale: "the agent drills into the first matching product card",
-      target: "Radiant Tee",
-    },
-    {
-      kind: "click",
-      ok: true,
-      details: "opened the product detail page",
-    },
-    "product options are visible",
-    callbacks,
-  );
-
-  if (steps.length >= input.config.maxSteps) {
-    return;
-  }
-
-  await selectMagentoOption(page, "size");
-  await sleep(paceMs(input.persona, "click"));
-  await selectMagentoOption(page, "color");
-  await sleep(paceMs(input.persona, "click"));
-
-  await appendStep(
-    page,
-    input,
-    startedAt,
-    agentId,
-    steps,
-    state,
-    {
-      kind: "click",
-      rationale: "size and color must be grounded before the cart CTA becomes valid",
-      target: "size and color selectors",
-    },
-    {
-      kind: "click",
-      ok: true,
-      details: "selected the first visible size and color swatches",
-    },
-    "required purchase options are resolved",
-    callbacks,
-  );
-
-  if (steps.length >= input.config.maxSteps) {
-    return;
-  }
-
-  await clickWithFallback(page, "Add to Cart", [
-    () => page.locator("#product-addtocart-button"),
-    () => page.getByRole("button", { name: /add to cart/i }),
-  ]);
-  await sleep(paceMs(input.persona, "click") + 300);
-
-  if (input.persona.archetype === "ChaosAgent") {
-    await page
-      .getByRole("button", { name: /add to cart/i })
-      .first()
-      .click({ timeout: 2_000 })
-      .catch(() => undefined);
-  }
-
-  await appendStep(
-    page,
-    input,
-    startedAt,
-    agentId,
-    steps,
-    state,
-    {
-      kind: input.persona.archetype === "ChaosAgent" ? "retry" : "click",
-      rationale:
-        input.persona.archetype === "ChaosAgent"
-          ? "chaos agents tend to re-trigger the CTA when success feedback is delayed"
-          : "the primary CTA advances the product into cart intent",
-      target: "Add to Cart",
-    },
-    {
-      kind: input.persona.archetype === "ChaosAgent" ? "retry" : "click",
-      ok: true,
-      details:
-        input.persona.archetype === "ChaosAgent"
-          ? "re-triggered add-to-cart after a short feedback delay"
-          : "sent the configured product into the cart flow",
-    },
-    "the cart CTA has been exercised",
-    callbacks,
-  );
-
-  if (steps.length >= input.config.maxSteps) {
-    return;
-  }
-
-  await clickWithFallback(page, "cart confirmation", [
-    () => page.locator("a.action.showcart"),
-    () => page.locator("a[href*='checkout/cart']"),
-    () => page.getByRole("link", { name: /shopping cart/i }),
-  ]).catch(async () => {
-    await page.goto("https://magento.softwaretestingboard.com/checkout/cart/", {
-      waitUntil: "domcontentloaded",
-      timeout: 15_000,
-    });
-
-    return { method: "navigation" as const, target: "cart page" };
-  });
-
-  await page.waitForURL(/checkout\/cart/, { timeout: 15_000 }).catch(() => undefined);
-  await sleep(paceMs(input.persona, "click"));
-
-  await appendStep(
-    page,
-    input,
-    startedAt,
-    agentId,
-    steps,
-    state,
-    {
-      kind: "click",
-      rationale: "the agent validates the cart boundary after the product CTA",
-      target: "cart confirmation",
-    },
-    {
-      kind: "click",
-      ok: true,
-      details: "landed on the cart confirmation surface",
-    },
-    "cart confirmation is visible",
-    callbacks,
-  );
-}
-
-async function waitForWalmartResults(page: Page) {
-  await page.locator("a[href*='/ip/']").first().waitFor({ timeout: 10_000 });
-}
-
-async function waitForWalmartProduct(page: Page) {
-  await page.locator("[data-automation-id='atc'], button:has-text('Add to cart')").first().waitFor({ timeout: 12_000 });
-}
-
-async function runWalmartFlow(
-  page: Page,
-  input: AgentRunInput,
-  startedAt: string,
-  agentId: string,
-  steps: AgentStepRecord[],
-  state: { frustration: number; confidence: number },
-  callbacks: LiveSwarmCallbacks,
-) {
-  await page.goto(input.config.targetUrl, { waitUntil: "domcontentloaded", timeout: 20_000 });
-  await sleep(paceMs(input.persona, "load"));
-
-  await appendStep(
-    page,
-    input,
-    startedAt,
-    agentId,
-    steps,
-    state,
-    {
-      kind: "wait",
-      rationale: "the agent waits for the Walmart landing surface to settle",
-    },
-    {
-      kind: "wait",
-      ok: true,
-      details: "loaded the Walmart home page",
-    },
-    "search entry is visible",
-    callbacks,
-  );
-
-  await assertUsableSurface(page);
-  await maybeScan(page, input, startedAt, agentId, steps, state, callbacks, "paused to scan the retail header chrome");
-
-  if (steps.length >= input.config.maxSteps) {
-    return;
-  }
-
-  const searchBox = page.locator("input[type='search'], input[aria-label*='Search']").first();
-  await searchBox.fill("laptop");
-  await sleep(paceMs(input.persona, "type"));
-  await searchBox.press("Enter");
-  const searchNavigation = await page
-    .waitForURL(/walmart\.com\/search/, { timeout: 4_000 })
-    .then(() => "submitted")
-    .catch(async () => {
-      await page.goto("https://www.walmart.com/search?q=laptop", {
-        waitUntil: "domcontentloaded",
-        timeout: 15_000,
-      });
-
-      return "fallback";
-    });
-  await waitForWalmartResults(page);
+  await page.waitForURL(/products\?search=/, { timeout: 15_000 });
   await sleep(paceMs(input.persona, "click"));
 
   await appendStep(
@@ -857,19 +611,16 @@ async function runWalmartFlow(
     state,
     {
       kind: "type",
-      rationale: "the retail header search is the fastest route into Walmart assortment",
+      rationale: "the catalog search box is the fastest route to a precise product detail page",
       target: "search",
-      value: "laptop",
+      value: "Blue Top",
     },
     {
       kind: "type",
       ok: true,
-      details:
-        searchNavigation === "submitted"
-          ? "searched Walmart for laptop inventory from the retail header"
-          : "search submit stalled, so the agent recovered by navigating directly to the results URL",
+      details: "searched the public catalog for the Blue Top product",
     },
-    "results grid is visible",
+    "filtered results are now visible",
     callbacks,
   );
 
@@ -879,11 +630,11 @@ async function runWalmartFlow(
     return;
   }
 
-  await clickWithFallback(page, "first product", [
-    () => page.locator("a[href*='/ip/']"),
-    () => page.locator("[data-automation-id='product-title']").locator("a"),
+  await clickWithFallback(page, "View Product", [
+    () => page.locator("a[href='/product_details/1']"),
+    () => page.getByRole("link", { name: /View Product/i }),
   ]);
-  await waitForWalmartProduct(page);
+  await page.waitForURL(/product_details\//, { timeout: 15_000 });
   await sleep(paceMs(input.persona, "click"));
 
   await appendStep(
@@ -895,13 +646,13 @@ async function runWalmartFlow(
     state,
     {
       kind: "click",
-      rationale: "the agent drills into the first visible product card from the results grid",
-      target: "first Walmart result",
+      rationale: "the agent drills into the first matching product detail page from the filtered catalog",
+      target: "View Product",
     },
     {
       kind: "click",
       ok: true,
-      details: "opened a Walmart product detail page",
+      details: "opened the Blue Top product detail surface",
     },
     "product detail is visible",
     callbacks,
@@ -914,15 +665,11 @@ async function runWalmartFlow(
   }
 
   await clickWithFallback(page, "Add to cart", [
-    () => page.locator("[data-automation-id='atc']"),
-    () => page.getByRole("button", { name: /^add to cart$/i }),
     () => page.getByRole("button", { name: /add to cart/i }),
+    () => page.locator("button.cart"),
   ]);
-  await sleep(paceMs(input.persona, "click") + 800);
-
-  if (input.persona.archetype === "ChaosAgent") {
-    await page.locator("[data-automation-id='atc']").first().click({ timeout: 2_000 }).catch(() => undefined);
-  }
+  await page.locator("#cartModal").waitFor({ timeout: 10_000 }).catch(() => undefined);
+  await sleep(paceMs(input.persona, "click"));
 
   await appendStep(
     page,
@@ -932,22 +679,402 @@ async function runWalmartFlow(
     steps,
     state,
     {
-      kind: input.persona.archetype === "ChaosAgent" ? "retry" : "click",
-      rationale:
-        input.persona.archetype === "ChaosAgent"
-          ? "chaos agents may hammer the CTA when cart feedback is delayed"
-          : "the primary CTA pushes the chosen Walmart item toward cart intent",
+      kind: "click",
+      rationale: "the primary product CTA moves the search result into cart intent",
       target: "Add to cart",
     },
     {
-      kind: input.persona.archetype === "ChaosAgent" ? "retry" : "click",
+      kind: "click",
       ok: true,
-      details:
-        input.persona.archetype === "ChaosAgent"
-          ? "re-triggered Walmart add-to-cart after a short feedback delay"
-          : "sent the Walmart product into cart intent",
+      details: "added the product from the detail page into the cart modal",
     },
-    "cart intent feedback has been exercised",
+    "cart intent modal is visible",
+    callbacks,
+  );
+
+  if (steps.length >= input.config.maxSteps) {
+    return;
+  }
+
+  await clickWithFallback(page, "View Cart", [
+    () => page.locator("a[href='/view_cart']").filter({ hasText: /View Cart/i }),
+    () => page.getByRole("link", { name: /view cart/i }),
+  ]).catch(async () => {
+    await page.goto("https://automationexercise.com/view_cart", {
+      waitUntil: "domcontentloaded",
+      timeout: 15_000,
+    });
+
+    return { method: "navigation" as const, target: "cart review" };
+  });
+  await page.waitForURL(/view_cart/, { timeout: 15_000 }).catch(() => undefined);
+  await sleep(paceMs(input.persona, "click"));
+
+  await appendStep(
+    page,
+    input,
+    startedAt,
+    agentId,
+    steps,
+    state,
+    {
+      kind: "click",
+      rationale: "the agent verifies the cart boundary after the add-to-cart modal appears",
+      target: "View Cart",
+    },
+    {
+      kind: "click",
+      ok: true,
+      details: "opened the cart review surface",
+    },
+    "cart review is visible",
+    callbacks,
+  );
+}
+
+async function runTheInternetFlow(
+  page: Page,
+  input: AgentRunInput,
+  startedAt: string,
+  agentId: string,
+  steps: AgentStepRecord[],
+  state: { frustration: number; confidence: number },
+  callbacks: LiveSwarmCallbacks,
+) {
+  await page.goto(input.config.targetUrl, { waitUntil: "domcontentloaded", timeout: 20_000 });
+  await sleep(paceMs(input.persona, "load"));
+
+  await appendStep(
+    page,
+    input,
+    startedAt,
+    agentId,
+    steps,
+    state,
+    {
+      kind: "wait",
+      rationale: "the agent waits for the module directory to settle before selecting the auth surface",
+    },
+    {
+      kind: "wait",
+      ok: true,
+      details: "loaded The Internet directory of test modules",
+    },
+    "module directory is visible",
+    callbacks,
+  );
+
+  await assertUsableSurface(page);
+  await maybeScan(page, input, startedAt, agentId, steps, state, callbacks, "paused to scan the module list before choosing auth");
+
+  if (steps.length >= input.config.maxSteps) {
+    return;
+  }
+
+  await clickWithFallback(page, "Form Authentication", [
+    () => page.getByRole("link", { name: /form authentication/i }),
+    () => page.locator("a[href='/login']"),
+  ]);
+  await page.waitForURL(/the-internet\.herokuapp\.com\/login/, { timeout: 15_000 });
+  await sleep(paceMs(input.persona, "click"));
+
+  await appendStep(
+    page,
+    input,
+    startedAt,
+    agentId,
+    steps,
+    state,
+    {
+      kind: "click",
+      rationale: "the Form Authentication module is the cleanest path to a visible success state",
+      target: "Form Authentication",
+    },
+    {
+      kind: "click",
+      ok: true,
+      details: "opened the Form Authentication module",
+    },
+    "auth form is visible",
+    callbacks,
+  );
+
+  await assertUsableSurface(page);
+
+  if (steps.length >= input.config.maxSteps) {
+    return;
+  }
+
+  await page.getByLabel("Username").fill("tomsmith");
+  await sleep(paceMs(input.persona, "type"));
+  await page.getByLabel("Password").fill("SuperSecretPassword!");
+  await sleep(paceMs(input.persona, "type"));
+
+  await appendStep(
+    page,
+    input,
+    startedAt,
+    agentId,
+    steps,
+    state,
+    {
+      kind: "type",
+      rationale: "the secure area is behind a visible username and password form",
+      target: "login form",
+      value: "tomsmith / SuperSecretPassword!",
+    },
+    {
+      kind: "type",
+      ok: true,
+      details: "filled the published demo credentials",
+    },
+    "credentials are ready for submit",
+    callbacks,
+  );
+
+  if (steps.length >= input.config.maxSteps) {
+    return;
+  }
+
+  await clickWithFallback(page, "Login", [
+    () => page.getByRole("button", { name: /^login$/i }),
+    () => page.locator("button[type='submit']"),
+  ]);
+  await page.waitForURL(/the-internet\.herokuapp\.com\/secure/, { timeout: 15_000 });
+  await sleep(paceMs(input.persona, "click"));
+
+  await appendStep(
+    page,
+    input,
+    startedAt,
+    agentId,
+    steps,
+    state,
+    {
+      kind: "click",
+      rationale: "the login CTA is the final gate into the secure area",
+      target: "Login",
+    },
+    {
+      kind: "click",
+      ok: true,
+      details: "landed on the secure area and observed the success flash",
+    },
+    "secure area is visible",
+    callbacks,
+  );
+}
+
+async function runExpandTestingFlow(
+  page: Page,
+  input: AgentRunInput,
+  startedAt: string,
+  agentId: string,
+  steps: AgentStepRecord[],
+  state: { frustration: number; confidence: number },
+  callbacks: LiveSwarmCallbacks,
+) {
+  await page.goto(input.config.targetUrl, { waitUntil: "domcontentloaded", timeout: 20_000 });
+  await sleep(paceMs(input.persona, "load"));
+
+  await appendStep(
+    page,
+    input,
+    startedAt,
+    agentId,
+    steps,
+    state,
+    {
+      kind: "wait",
+      rationale: "the agent waits for the validation form to settle before editing multiple fields",
+    },
+    {
+      kind: "wait",
+      ok: true,
+      details: "loaded the Expand Testing validation form",
+    },
+    "validation form is visible",
+    callbacks,
+  );
+
+  await assertUsableSurface(page);
+  await maybeScan(page, input, startedAt, agentId, steps, state, callbacks, "paused to scan the labels and field order");
+
+  if (steps.length >= input.config.maxSteps) {
+    return;
+  }
+
+  await page.locator("#validationCustom01").fill("Chaos Swarm");
+  await sleep(paceMs(input.persona, "type"));
+  await page.locator("input[name='contactnumber']").fill("012-3456789");
+  await sleep(paceMs(input.persona, "type"));
+  await page.locator("input[name='pickupdate']").fill("2026-04-15");
+  await sleep(paceMs(input.persona, "type"));
+  await page.locator("select[name='payment']").selectOption({ label: "card" });
+  await sleep(paceMs(input.persona, "click"));
+
+  await appendStep(
+    page,
+    input,
+    startedAt,
+    agentId,
+    steps,
+    state,
+    {
+      kind: "type",
+      rationale: "the form requires valid text, phone, date, and payment inputs before submit is meaningful",
+      target: "validation form",
+      value: "name, phone, pickup date, payment",
+    },
+    {
+      kind: "type",
+      ok: true,
+      details: "filled the visible validation form controls with valid values",
+    },
+    "validation inputs are resolved",
+    callbacks,
+  );
+
+  if (steps.length >= input.config.maxSteps) {
+    return;
+  }
+
+  await clickWithFallback(page, "Register", [
+    () => page.getByRole("button", { name: /register/i }),
+    () => page.locator("button[type='submit']"),
+  ]);
+  await page.waitForURL(/practice\.expandtesting\.com\/form-confirmation/, { timeout: 15_000 });
+  await sleep(paceMs(input.persona, "click"));
+
+  await appendStep(
+    page,
+    input,
+    startedAt,
+    agentId,
+    steps,
+    state,
+    {
+      kind: "click",
+      rationale: "the final submit validates whether the form accepts the assembled inputs",
+      target: "Register",
+    },
+    {
+      kind: "click",
+      ok: true,
+      details: "submitted the validation form and reached the confirmation page",
+    },
+    "confirmation page is visible",
+    callbacks,
+  );
+}
+
+async function runParabankFlow(
+  page: Page,
+  input: AgentRunInput,
+  startedAt: string,
+  agentId: string,
+  steps: AgentStepRecord[],
+  state: { frustration: number; confidence: number },
+  callbacks: LiveSwarmCallbacks,
+) {
+  await page.goto(input.config.targetUrl, { waitUntil: "domcontentloaded", timeout: 20_000 });
+  await sleep(paceMs(input.persona, "load"));
+
+  await appendStep(
+    page,
+    input,
+    startedAt,
+    agentId,
+    steps,
+    state,
+    {
+      kind: "wait",
+      rationale: "the agent waits for the finance onboarding form to settle before typing dense profile data",
+    },
+    {
+      kind: "wait",
+      ok: true,
+      details: "loaded the ParaBank registration page",
+    },
+    "registration form is visible",
+    callbacks,
+  );
+
+  await assertUsableSurface(page);
+  await maybeScan(page, input, startedAt, agentId, steps, state, callbacks, "paused to scan the dense onboarding form");
+
+  if (steps.length >= input.config.maxSteps) {
+    return;
+  }
+
+  const suffix = (input.config.seed ?? `${Date.now()}`).replace(/[^a-z0-9]/gi, "").slice(-8).toLowerCase();
+  const username = `chaosswarm${suffix}`;
+  const password = "SuperSecret123!";
+
+  await page.locator("[name='customer.firstName']").fill("Chaos");
+  await page.locator("[name='customer.lastName']").fill("Swarm");
+  await page.locator("[name='customer.address.street']").fill("1 Market St");
+  await page.locator("[name='customer.address.city']").fill("San Francisco");
+  await page.locator("[name='customer.address.state']").fill("CA");
+  await page.locator("[name='customer.address.zipCode']").fill("94105");
+  await page.locator("[name='customer.phoneNumber']").fill("4155550101");
+  await page.locator("[name='customer.ssn']").fill(suffix.padStart(8, "0").slice(0, 8));
+  await page.locator("[name='customer.username']").fill(username);
+  await page.locator("[name='customer.password']").fill(password);
+  await page.locator("[name='repeatedPassword']").fill(password);
+  await sleep(paceMs(input.persona, "type"));
+
+  await appendStep(
+    page,
+    input,
+    startedAt,
+    agentId,
+    steps,
+    state,
+    {
+      kind: "type",
+      rationale: "the onboarding surface requires a fully populated identity and credential set",
+      target: "registration form",
+      value: username,
+    },
+    {
+      kind: "type",
+      ok: true,
+      details: "filled the ParaBank registration inputs with a unique seeded username",
+    },
+    "registration inputs are populated",
+    callbacks,
+  );
+
+  if (steps.length >= input.config.maxSteps) {
+    return;
+  }
+
+  await clickWithFallback(page, "Register", [
+    () => page.locator("input[value='Register']"),
+    () => page.getByRole("button", { name: /register/i }),
+  ]);
+  await page.locator("a[href*='openaccount'], a[href*='overview']").first().waitFor({ timeout: 15_000 });
+  await sleep(paceMs(input.persona, "click"));
+
+  await appendStep(
+    page,
+    input,
+    startedAt,
+    agentId,
+    steps,
+    state,
+    {
+      kind: "click",
+      rationale: "the submit action determines whether the finance onboarding completes cleanly",
+      target: "Register",
+    },
+    {
+      kind: "click",
+      ok: true,
+      details: "created a fresh ParaBank account and reached the account-services dashboard",
+    },
+    "account services are visible",
     callbacks,
   );
 }
@@ -985,26 +1112,28 @@ async function runLiveAgent(
   try {
     if (scenario.id === "saucedemo") {
       await runSaucedemoFlow(page, input, startedAt, agentId, steps, state, callbacks);
-    } else if (scenario.id === "magento") {
-      await runMagentoFlow(page, input, startedAt, agentId, steps, state, callbacks);
+    } else if (scenario.id === "automationexercise") {
+      await runAutomationExerciseFlow(page, input, startedAt, agentId, steps, state, callbacks);
+    } else if (scenario.id === "theinternet") {
+      await runTheInternetFlow(page, input, startedAt, agentId, steps, state, callbacks);
+    } else if (scenario.id === "expandtesting") {
+      await runExpandTestingFlow(page, input, startedAt, agentId, steps, state, callbacks);
     } else {
-      await runWalmartFlow(page, input, startedAt, agentId, steps, state, callbacks);
+      await runParabankFlow(page, input, startedAt, agentId, steps, state, callbacks);
     }
 
     finalPage = await snapshotPage(page, input.config.targetUrl);
     const completed =
       scenario.id === "saucedemo"
         ? /cart/.test(finalPage.url)
-        : scenario.id === "magento"
-          ? /checkout\/cart/.test(finalPage.url) || finalPage.visibleTargets.some((target) => /checkout/i.test(target))
-          : /walmart\.com\/cart/.test(finalPage.url) ||
-            finalPage.visibleTargets.some((target) => /check out|continue to cart|cart contains/i.test(target)) ||
-            steps.some(
-              (step) =>
-                step.decision.target === "Add to cart" &&
-                step.action.ok &&
-                !step.observation.page.errorFlags.some((flag) => BLOCKED_SURFACE_PATTERN.test(flag)),
-            );
+        : scenario.id === "automationexercise"
+          ? /automationexercise\.com\/view_cart/.test(finalPage.url)
+          : scenario.id === "theinternet"
+            ? /the-internet\.herokuapp\.com\/secure/.test(finalPage.url) ||
+              finalPage.visibleTargets.some((target) => /logout/i.test(target))
+            : scenario.id === "expandtesting"
+              ? /practice\.expandtesting\.com\/form-confirmation/.test(finalPage.url)
+              : finalPage.visibleTargets.some((target) => /open new account|accounts overview|log out/i.test(target));
 
     return buildRunningSnapshot(
       input,

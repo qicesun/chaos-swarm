@@ -14,7 +14,9 @@ const createRunSchema = z.object({
   goal: z.string().min(3).optional(),
   agentCount: z.number().int().min(1).max(32).default(12),
   maxSteps: z.number().int().min(2).max(12).default(5),
-  demoScenario: z.enum(["saucedemo", "magento", "walmart"]).default("saucedemo"),
+  demoScenario: z
+    .enum(["saucedemo", "automationexercise", "theinternet", "expandtesting", "parabank"])
+    .default("saucedemo"),
 });
 
 const activeJobs = new Map<string, Promise<void>>();
@@ -89,39 +91,58 @@ function stageMatched(run: AgentRunResult, scenario: DemoScenarioDefinition, sta
       }
     }
 
-    if (scenario.id === "magento") {
-      if (stage.id === "search") {
-        return step.step === 0 || /softwaretestingboard\.com\/?$/.test(stepUrl);
+    if (scenario.id === "automationexercise") {
+      if (stage.id === "catalog") {
+        return /automationexercise\.com\/products\/?$/.test(stepUrl);
       }
 
-      if (stage.id === "results") {
-        return /catalogsearch\/result/.test(stepUrl);
+      if (stage.id === "search-results") {
+        return /automationexercise\.com\/products\?search=/.test(stepUrl);
       }
 
-      if (stage.id === "options") {
-        return /radiant-tee/.test(stepUrl);
+      if (stage.id === "product-detail") {
+        return /automationexercise\.com\/product_details\//.test(stepUrl);
       }
 
-      if (stage.id === "confirmation") {
-        return /checkout\/cart/.test(stepUrl);
+      if (stage.id === "cart-review") {
+        return /automationexercise\.com\/view_cart/.test(stepUrl);
       }
     }
 
-    if (scenario.id === "walmart") {
-      if (stage.id === "search") {
-        return step.step === 0 || /walmart\.com\/?$/.test(stepUrl);
+    if (scenario.id === "theinternet") {
+      if (stage.id === "directory") {
+        return step.step === 0 || /the-internet\.herokuapp\.com\/?$/.test(stepUrl);
       }
 
-      if (stage.id === "results") {
-        return /walmart\.com\/search/.test(stepUrl);
+      if (stage.id === "auth-form") {
+        return /the-internet\.herokuapp\.com\/login/.test(stepUrl);
       }
 
-      if (stage.id === "product") {
-        return /walmart\.com\/ip\//.test(stepUrl);
+      if (stage.id === "secure-area") {
+        return /the-internet\.herokuapp\.com\/secure/.test(stepUrl);
+      }
+    }
+
+    if (scenario.id === "expandtesting") {
+      if (stage.id === "validation-form") {
+        return /practice\.expandtesting\.com\/form-validation/.test(stepUrl);
       }
 
-      if (stage.id === "cart-intent") {
-        return /walmart\.com\/cart/.test(stepUrl) || /check out|cart contains/i.test(step.observation.summary);
+      if (stage.id === "confirmation") {
+        return /practice\.expandtesting\.com\/form-confirmation/.test(stepUrl);
+      }
+    }
+
+    if (scenario.id === "parabank") {
+      if (stage.id === "registration-form") {
+        return (
+          /parabank\.parasoft\.com\/parabank\/register\.htm/.test(stepUrl) &&
+          step.observation.page.visibleTargets.some((target) => /register/i.test(target))
+        );
+      }
+
+      if (stage.id === "account-services") {
+        return step.observation.page.visibleTargets.some((target) => /open new account|accounts overview|log out/i.test(target));
       }
     }
 

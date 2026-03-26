@@ -1,6 +1,6 @@
 # Chaos Swarm
 
-Chaos Swarm is a cloud-first UX chaos testing demo that releases synthetic user agents against public web funnels and turns their friction into inspectable reports.
+Chaos Swarm is a cloud-first UX chaos testing demo that releases synthetic user agents against public websites and turns their friction into inspectable reports.
 
 ## Workspace
 
@@ -52,3 +52,11 @@ Chaos Swarm is a cloud-first UX chaos testing demo that releases synthetic user 
    ```
 
 The current implementation uses live local Playwright execution with in-memory progress streaming. Browserbase, Trigger.dev, and Supabase remain the next cloud/runtime upgrades.
+
+## Current demo targets
+
+- `SauceDemo`: commerce login and add-to-cart baseline
+- `Automation Exercise`: public catalog search, product detail, and cart review
+- `The Internet`: minimal secure-login flow
+- `Expand Testing`: generic form validation and confirmation
+- `ParaBank`: finance-style account registration

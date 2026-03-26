@@ -29,8 +29,8 @@ export default function Home() {
             Synthetic users. Real friction. Faster product truth.
           </h1>
           <p className="mt-6 max-w-2xl text-lg leading-8 text-[var(--muted)]">
-            Release a swarm of persona-shaped agents against public web funnels and inspect where confusion, delay,
-            and brittle UI patterns turn into abandonment.
+            Release a swarm of persona-shaped agents against public websites and inspect where confusion, delay,
+            brittle forms, and misleading affordances turn into abandonment.
           </p>
           <div className="mt-8 flex flex-wrap gap-4">
             <Link
