@@ -6,6 +6,28 @@ Chaos Swarm is organized as a layered browser-testing platform. The system separ
 
 The MVP architecture is optimized for fast validation and clear observability. A user creates a run from the web app, the orchestration layer fans out multiple agents, each agent opens an isolated browser context in the cloud, and the reporting layer composes the resulting telemetry into actionable artifacts.
 
+## Current Implementation Snapshot
+
+The live system now has two materially different execution postures:
+
+- Local development can run with direct Playwright on the workstation.
+- Public deployed runs can execute through Browserbase-backed cloud sessions.
+
+The active AI-native path today is:
+
+1. Scenario intake
+   Built-in demos use stored scenario profiles; custom runs can be AI-compiled from `URL + goal`.
+2. Step reasoning
+   The model sees the current screenshot, visible targets, screen-space candidate boxes, recent history, persona, and playbook.
+3. Step execution
+   The runtime executes the chosen action visually first, then may use DOM recovery unless strict visual mode disables it.
+4. Step interpretation
+   A second model pass decides current stage, goal status, plain-language step outcome, and bilingual explanations.
+5. Aggregate reporting
+   The reporting package still computes EFI, funnels, and failure clusters largely from deterministic aggregation logic.
+
+That means the system is already model-driven at the step level, but not yet fully model-native at the aggregate interpretation layer.
+
 ## High-Level Diagram
 
 ```mermaid
@@ -158,6 +180,14 @@ Chaos Swarm uses a hybrid browser strategy by design.
 
 This hybrid model matters because the product is not just trying to click through pages. It is trying to explain friction. Pure DOM automation misses perceived friction. Pure vision misses stability. The hybrid approach keeps both.
 
+The current runtime is therefore best described as:
+
+- visual-first for perception and action choice
+- hybrid for execution stability
+- transparent about recovery through visual purity and DOM assist metrics
+
+This is intentionally more honest than claiming a pure-vision system while silently leaning on structure.
+
 ## Extensibility Points
 
 ### Model Providers
@@ -217,3 +247,14 @@ This split keeps the app simple to operate and keeps the heavy execution workloa
 
 The architecture should evolve in layers, not through a rewrite. New personas should only extend the agent runtime. New report types should only extend the reporting package. New execution providers should only extend the browser adapter. The core principle is that the system should remain composable even as it grows from a demo into a product.
 
+## Remaining Deterministic Islands
+
+The main non-AI-native areas still left in the stack are:
+
+- candidate extraction and ranking before model selection
+- hand-authored built-in scenario definitions
+- deterministic funnel assembly and failure clustering
+- heuristic EFI component scoring
+- deterministic persona scaffolding and guardrails
+
+These are the next places to remove hand-written assumptions while preserving debuggability and trust.

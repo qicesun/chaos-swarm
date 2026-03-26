@@ -100,6 +100,24 @@ Chaos Swarm is a browser experience testing tool, not a load generator and not a
 
 ## MVP Roadmap
 
+## Current State Snapshot
+
+As of March 25, 2026, the project has moved beyond a fake scripted shell:
+
+- Public runs are created from a real deployed web app.
+- The active runtime uses real browser sessions and real page state.
+- Custom `URL + goal` intake can be AI-compiled into a temporary scenario profile.
+- Per-step action choice is model-driven.
+- Per-step completion and stage interpretation are model-driven.
+- Run and report surfaces now render bilingual founder-facing summaries.
+
+What is still not fully AI-native yet:
+
+- Candidate extraction still uses deterministic browser heuristics before the model sees the page.
+- Aggregate funneling, EFI scoring, and failure clustering are still largely rule-based.
+- Built-in demo scenarios still start from hand-authored scenario definitions.
+- Persona calibration is still partly parameterized rather than fully learned or synthesized.
+
 ### Phase 1
 
 - Public demo web app
@@ -128,3 +146,12 @@ The MVP deliberately trades absolute realism for operational usefulness. It does
 
 That tradeoff favors cloud browsers, structured telemetry, and strong observability. It also favors a hybrid browser control model over pure vision or pure DOM automation. The system should look like a high-signal product diagnosis engine, not a generic bot runner.
 
+## Near-Term AI-Native Priorities
+
+The next layer of work should remove the remaining deterministic islands in this order:
+
+1. AI-first scenario intake from arbitrary `URL + goal`, with less hand-authored stage scaffolding.
+2. AI-driven stage segmentation and funnel boundary detection across runs.
+3. AI-driven failure attribution that distinguishes product friction from runtime noise.
+4. Richer persona synthesis so different synthetic users diverge more naturally.
+5. More visual-first candidate understanding, while keeping transparent reporting on when DOM recovery was needed.
