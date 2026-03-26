@@ -1,7 +1,11 @@
 const storageMode: "memory" | "supabase" =
   process.env.CHAOS_SWARM_STORAGE_MODE === "supabase" ? "supabase" : "memory";
-const executionMode: "simulation" | "hybrid" =
-  process.env.CHAOS_SWARM_EXECUTION_MODE === "hybrid" ? "hybrid" : "simulation";
+const executionMode: "simulation" | "local" | "hybrid" =
+  process.env.CHAOS_SWARM_EXECUTION_MODE === "hybrid"
+    ? "hybrid"
+    : process.env.CHAOS_SWARM_EXECUTION_MODE === "simulation"
+      ? "simulation"
+      : "local";
 
 export const env = {
   storageMode,

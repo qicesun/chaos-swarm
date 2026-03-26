@@ -1,15 +1,9 @@
 import { randomUUID } from "node:crypto";
-import {
-  createAgent,
-  defaultPersonaSet,
-  type AgentHooks,
-  type AgentPersona,
-  type AgentRunInput,
-  type AgentRunResult,
-} from "@chaos-swarm/agent-core";
-import { buildReport, type ReportInput } from "@chaos-swarm/reporting";
+import { defaultPersonaSet, type AgentPersona, type AgentRunResult } from "@chaos-swarm/agent-core";
+import { buildReport, type ReportDocument, type ReportInput } from "@chaos-swarm/reporting";
 import { z } from "zod";
 import { env } from "./env";
+import { runLiveSwarm } from "./live-runner";
 import { persistRunRecord } from "./persistence";
 import { getScenario, listScenarios, type DemoScenarioDefinition } from "./scenarios";
 import { getStore } from "./store";
@@ -23,6 +17,8 @@ const createRunSchema = z.object({
   demoScenario: z.enum(["saucedemo", "magento"]).default("saucedemo"),
 });
 
+const activeJobs = new Map<string, Promise<void>>();
+
 function round(value: number) {
   return Math.round(value * 100) / 100;
 }
@@ -30,37 +26,6 @@ function round(value: number) {
 function selectPersonas(agentCount: number): AgentPersona[] {
   const catalog = defaultPersonaSet();
   return Array.from({ length: agentCount }, (_, index) => catalog[index % catalog.length]);
-}
-
-function makeScenarioHooks(scenario: DemoScenarioDefinition): AgentHooks {
-  return {
-    async observe(context) {
-      const frame = scenario.frames[Math.min(context.step, scenario.frames.length - 1)];
-      const errorFlags: string[] = [];
-      const impatience = 1 - context.persona.patience;
-      const noise = frame.errorBias + impatience * 0.2 + context.frustration * 0.3;
-
-      if (noise > 0.44) {
-        errorFlags.push("primary CTA feedback is ambiguous");
-      }
-
-      if (scenario.id === "magento" && frame.id === "options" && context.persona.archetype !== "Speedrunner") {
-        errorFlags.push("option selection is visually dense");
-      }
-
-      if (context.persona.archetype === "ChaosAgent" && context.step > 1 && context.frustration > 0.45) {
-        errorFlags.push("rage-click storm");
-      }
-
-      return {
-        url: frame.url,
-        title: `${scenario.siteLabel} - ${frame.label}`,
-        visibleTargets: frame.targets,
-        loadState: context.step === 0 ? "loading" : context.step >= scenario.frames.length ? "complete" : "interactive",
-        errorFlags,
-      };
-    },
-  };
 }
 
 function toTimeline(agentRuns: AgentRunResult[]): TimelineEvent[] {
@@ -104,17 +69,64 @@ function buildPersonaSummary(agentRuns: AgentRunResult[]): PersonaSnapshot[] {
   return [...map.values()];
 }
 
+function stageMatched(run: AgentRunResult, scenario: DemoScenarioDefinition, stage: DemoScenarioDefinition["frames"][number]) {
+  const stagePath = new URL(stage.url).pathname;
+
+  return run.steps.some((step) => {
+    const stepUrl = step.observation.page.url;
+
+    if (scenario.id === "saucedemo") {
+      if (stage.id === "login") {
+        return /saucedemo\.com\/?$/.test(stepUrl) || /login/i.test(step.observation.summary);
+      }
+
+      if (stage.id === "inventory") {
+        return /inventory/.test(stepUrl);
+      }
+
+      if (stage.id === "cart") {
+        return /cart/.test(stepUrl);
+      }
+    }
+
+    if (scenario.id === "magento") {
+      if (stage.id === "search") {
+        return step.step === 0 || /softwaretestingboard\.com\/?$/.test(stepUrl);
+      }
+
+      if (stage.id === "results") {
+        return /catalogsearch\/result/.test(stepUrl);
+      }
+
+      if (stage.id === "options") {
+        return /radiant-tee/.test(stepUrl);
+      }
+
+      if (stage.id === "confirmation") {
+        return /checkout\/cart/.test(stepUrl);
+      }
+    }
+
+    if (stagePath !== "/") {
+      return stepUrl.includes(stagePath);
+    }
+
+    return false;
+  });
+}
+
 function buildStageSummary(agentRuns: AgentRunResult[], scenario: DemoScenarioDefinition): StageSnapshot[] {
-  return scenario.frames.map((frame, index) => {
-    const reached = agentRuns.filter((run) => run.steps.length > index).length;
-    const stuck = agentRuns.filter((run) => {
-      const step = run.steps[index];
-      return step?.observation.page.errorFlags.length;
-    }).length;
+  return scenario.frames.map((frame) => {
+    const reachedRuns = agentRuns.filter((run) => stageMatched(run, scenario, frame));
+    const stuck = reachedRuns.filter((run) =>
+      run.steps.some(
+        (step) => stageMatched({ ...run, steps: [step] }, scenario, frame) && step.observation.page.errorFlags.length > 0,
+      ),
+    ).length;
 
     return {
       label: frame.label,
-      reached,
+      reached: reachedRuns.length,
       stuck,
     };
   });
@@ -139,14 +151,125 @@ function buildWarnings() {
   const warnings: string[] = [];
 
   if (!env.openAiApiKey) {
-    warnings.push("OPENAI_API_KEY is not wired yet, so run generation is using deterministic simulation hooks.");
+    warnings.push("OPENAI_API_KEY is not configured yet, so model-assisted page evaluation is disabled.");
   }
 
-  if (env.executionMode !== "hybrid") {
-    warnings.push("Browser execution is still in simulation mode; live Browserbase sessions are the next integration step.");
+  if (env.executionMode === "simulation") {
+    warnings.push("Browser execution is still in simulation mode.");
+  } else if (env.executionMode === "local") {
+    warnings.push("Local Playwright execution is active on this workstation; Browserbase fan-out is not enabled yet.");
+  }
+
+  if (!env.supabaseServiceRoleKey || !env.supabaseUrl) {
+    warnings.push("Supabase persistence is disabled.");
   }
 
   return warnings;
+}
+
+function createPlaceholderReport(targetUrl: string, goal: string, agentCount: number): ReportDocument {
+  return {
+    title: `Chaos Swarm report for ${goal}`,
+    summary: `Run in progress against ${targetUrl}. Waiting for agent telemetry before rendering the final report.`,
+    sections: [
+      {
+        heading: "Status",
+        body: "The swarm is still executing. EFI, failure clusters, and the narrative report will populate as agents finish.",
+      },
+    ],
+    generatedAt: new Date().toISOString(),
+    efi: {
+      score: 0,
+      components: [],
+    },
+    funnel: [],
+    failureClusters: [],
+    highlightReel: [],
+    heatmap: [],
+    metadata: {
+      targetUrl,
+      goal,
+      agentCount,
+      pending: true,
+    },
+  };
+}
+
+function refreshDerivedFields(record: RunRecord, scenario: DemoScenarioDefinition) {
+  record.events = toTimeline(record.agentRuns);
+  record.summary = buildSummary(record.agentRuns);
+  record.personaSummary = buildPersonaSummary(record.agentRuns);
+  record.stageSummary = buildStageSummary(record.agentRuns, scenario);
+}
+
+function upsertAgentRun(record: RunRecord, scenario: DemoScenarioDefinition, nextRun: AgentRunResult) {
+  const existingIndex = record.agentRuns.findIndex((run) => run.agentId === nextRun.agentId);
+
+  if (existingIndex === -1) {
+    record.agentRuns.push(nextRun);
+  } else {
+    record.agentRuns[existingIndex] = nextRun;
+  }
+
+  refreshDerivedFields(record, scenario);
+}
+
+function finalizeRun(record: RunRecord) {
+  const reportInput: ReportInput = {
+    targetUrl: record.targetUrl,
+    goal: record.goal,
+    agentRuns: record.agentRuns,
+  };
+
+  record.report = buildReport(reportInput);
+  record.completedAt = new Date().toISOString();
+}
+
+async function persistBestEffort(record: RunRecord) {
+  const persistence = await persistRunRecord(record);
+
+  if (!persistence.ok && !record.warnings.includes(persistence.warning)) {
+    record.warnings.push(persistence.warning);
+  }
+}
+
+async function executeRun(record: RunRecord, scenario: DemoScenarioDefinition, personas: AgentPersona[], maxSteps: number) {
+  record.status = "running";
+  refreshDerivedFields(record, scenario);
+  await persistBestEffort(record);
+
+  try {
+    const results = await runLiveSwarm({
+      runId: record.id,
+      scenario,
+      targetUrl: record.targetUrl,
+      goal: record.goal,
+      maxSteps,
+      personas,
+      onAgentStart(run) {
+        upsertAgentRun(record, scenario, run);
+      },
+      onAgentStep(run) {
+        upsertAgentRun(record, scenario, run);
+      },
+      onAgentComplete(run) {
+        upsertAgentRun(record, scenario, run);
+      },
+    });
+
+    record.agentRuns = results;
+    record.status = "completed";
+    refreshDerivedFields(record, scenario);
+    finalizeRun(record);
+    await persistBestEffort(record);
+  } catch (error) {
+    record.status = "failed";
+    record.completedAt = new Date().toISOString();
+    record.warnings.push(error instanceof Error ? error.message : "Unknown run execution failure.");
+    await persistBestEffort(record);
+  } finally {
+    activeJobs.delete(record.id);
+  }
 }
 
 export function getCreateRunSchema() {
@@ -160,39 +283,14 @@ export function getDemoScenarios() {
 export async function createRun(input: unknown) {
   const payload = createRunSchema.parse(input);
   const scenario = getScenario(payload.demoScenario);
-  const agent = createAgent({ hooks: makeScenarioHooks(scenario) });
   const runId = randomUUID();
   const personas = selectPersonas(payload.agentCount);
-
-  const agentRuns = await Promise.all(
-    personas.map((persona, index) => {
-      const agentInput: AgentRunInput = {
-        agentId: `${persona.archetype.toLowerCase()}-${String(index + 1).padStart(2, "0")}`,
-        persona,
-        config: {
-          targetUrl: payload.targetUrl ?? scenario.targetUrl,
-          goal: payload.goal ?? scenario.goal,
-          maxSteps: payload.maxSteps,
-          seed: `${runId}-${index + 1}`,
-          demoMode: true,
-        },
-      };
-
-      return agent.run(agentInput);
-    }),
-  );
-
-  const reportInput: ReportInput = {
-    targetUrl: payload.targetUrl ?? scenario.targetUrl,
-    goal: payload.goal ?? scenario.goal,
-    agentRuns,
-  };
-  const report = buildReport(reportInput);
+  const now = new Date().toISOString();
   const record: RunRecord = {
     id: runId,
-    status: "completed",
-    createdAt: agentRuns[0]?.startedAt ?? new Date().toISOString(),
-    completedAt: new Date().toISOString(),
+    status: "queued",
+    createdAt: now,
+    completedAt: null,
     scenarioId: payload.demoScenario,
     scenarioName: scenario.name,
     targetUrl: payload.targetUrl ?? scenario.targetUrl,
@@ -200,21 +298,26 @@ export async function createRun(input: unknown) {
     agentCount: payload.agentCount,
     storageMode: env.storageMode,
     executionMode: env.executionMode,
-    summary: buildSummary(agentRuns),
-    personaSummary: buildPersonaSummary(agentRuns),
-    stageSummary: buildStageSummary(agentRuns, scenario),
-    agentRuns,
-    events: toTimeline(agentRuns),
-    report,
+    summary: {
+      completed: 0,
+      failed: 0,
+      averageSteps: 0,
+      peakFrustration: 0,
+    },
+    personaSummary: [],
+    stageSummary: scenario.frames.map((frame) => ({ label: frame.label, reached: 0, stuck: 0 })),
+    agentRuns: [],
+    events: [],
+    report: createPlaceholderReport(payload.targetUrl ?? scenario.targetUrl, payload.goal ?? scenario.goal, payload.agentCount),
     warnings: buildWarnings(),
   };
 
   getStore().runs.set(record.id, record);
-  const persistence = await persistRunRecord(record);
+  await persistBestEffort(record);
 
-  if (!persistence.ok && !record.warnings.includes(persistence.warning)) {
-    record.warnings.push(persistence.warning);
-  }
+  const job = executeRun(record, scenario, personas, payload.maxSteps);
+  activeJobs.set(record.id, job);
+  void job;
 
   return record;
 }

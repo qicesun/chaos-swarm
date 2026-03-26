@@ -99,7 +99,7 @@ export default function Home() {
           <h2 className="mt-2 text-3xl font-semibold tracking-tight">Cloud-first demo loop</h2>
           <ul className="mt-5 space-y-4 text-sm leading-7 text-[var(--muted)]">
             <li>No login gate in v1. Every page is optimized for investor-visible speed.</li>
-            <li>Simulation mode is live now; Browserbase and Trigger.dev are the next runtime upgrades.</li>
+            <li>Local Playwright execution is live now; Browserbase and Trigger.dev are the next scale upgrades.</li>
             <li>Supabase schema is already checked in, so persistence can switch from memory to Postgres cleanly.</li>
           </ul>
         </aside>

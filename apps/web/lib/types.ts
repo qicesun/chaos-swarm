@@ -34,14 +34,14 @@ export interface RunRecord {
   id: string;
   status: "completed" | "queued" | "running" | "failed";
   createdAt: string;
-  completedAt: string;
+  completedAt: string | null;
   scenarioId: DemoScenarioId;
   scenarioName: string;
   targetUrl: string;
   goal: string;
   agentCount: number;
   storageMode: "memory" | "supabase";
-  executionMode: "simulation" | "hybrid";
+  executionMode: "simulation" | "local" | "hybrid";
   summary: {
     completed: number;
     failed: number;
@@ -55,4 +55,3 @@ export interface RunRecord {
   report: ReportDocument;
   warnings: string[];
 }
-

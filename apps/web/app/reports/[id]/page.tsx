@@ -1,4 +1,5 @@
 import { notFound } from "next/navigation";
+import Link from "next/link";
 import { getRunRecord } from "@/lib/run-service";
 
 interface ReportPageProps {
@@ -11,6 +12,28 @@ export default async function ReportPage({ params }: ReportPageProps) {
 
   if (!record) {
     notFound();
+  }
+
+  if (record.status !== "completed") {
+    return (
+      <main className="mx-auto flex min-h-screen w-full max-w-4xl flex-col px-6 py-8 lg:px-10">
+        <section className="panel-strong rounded-[2rem] px-8 py-9">
+          <p className="text-sm uppercase tracking-[0.3em] text-[var(--muted)]">Report</p>
+          <h1 className="mt-3 text-4xl font-semibold tracking-[-0.04em]">Report is still rendering</h1>
+          <p className="mt-4 max-w-3xl text-lg leading-8 text-[var(--muted)]">
+            The swarm has not reached a terminal state yet. Wait for the run to finish, then reopen this report.
+          </p>
+          <div className="mt-8">
+            <Link
+              href={`/runs/${record.id}`}
+              className="rounded-full bg-[var(--accent)] px-5 py-3 text-sm font-semibold text-white"
+            >
+              Back to live run
+            </Link>
+          </div>
+        </section>
+      </main>
+    );
   }
 
   const report = record.report;

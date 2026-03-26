@@ -141,10 +141,10 @@ export function RunComposer({ scenarios }: RunComposerProps) {
 
         <div className="mt-8 rounded-[1.5rem] border border-[var(--line)] bg-white/60 p-5">
           <p className="text-sm uppercase tracking-[0.18em] text-[var(--muted)]">Execution mode</p>
-          <h3 className="mt-2 text-lg font-semibold">Simulation-first, cloud-ready</h3>
+          <h3 className="mt-2 text-lg font-semibold">Live local execution, cloud-ready</h3>
           <p className="mt-2 text-sm leading-7 text-[var(--muted)]">
-            This build produces deterministic swarm telemetry now, while Browserbase and Trigger.dev credentials are
-            finalized for live browser orchestration.
+            This build executes flows with local Playwright contexts and streams timeline updates live. Browserbase and
+            Trigger.dev remain the next scale layer for cloud fan-out.
           </p>
         </div>
 

@@ -13,14 +13,5 @@ export async function GET(_: Request, { params }: RunRouteProps) {
     return NextResponse.json({ error: "Run not found." }, { status: 404 });
   }
 
-  return NextResponse.json({
-    id: record.id,
-    status: record.status,
-    scenarioId: record.scenarioId,
-    scenarioName: record.scenarioName,
-    summary: record.summary,
-    personaSummary: record.personaSummary,
-    stageSummary: record.stageSummary,
-    warnings: record.warnings,
-  });
+  return NextResponse.json(record);
 }
