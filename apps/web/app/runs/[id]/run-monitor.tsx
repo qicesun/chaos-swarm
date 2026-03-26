@@ -10,6 +10,9 @@ interface RunMonitorProps {
 
 export function RunMonitor({ initialRun }: RunMonitorProps) {
   const [run, setRun] = useState(initialRun);
+  const [timelineMode, setTimelineMode] = useState<"agents" | "feed">("agents");
+  const [personaFilter, setPersonaFilter] = useState<"all" | "Speedrunner" | "Novice" | "ChaosAgent">("all");
+  const [outcomeFilter, setOutcomeFilter] = useState<"all" | "succeeded" | "failed">("all");
 
   useEffect(() => {
     if (run.status === "completed" || run.status === "failed") {
@@ -46,6 +49,37 @@ export function RunMonitor({ initialRun }: RunMonitorProps) {
   }, [run.id, run.status]);
 
   const reportReady = run.status === "completed";
+  const latestEventsByAgent = Array.from(
+    run.events.reduce((map, event) => {
+      map.set(event.agentId, event);
+      return map;
+    }, new Map<string, RunRecord["events"][number]>()),
+  )
+    .map(([, event]) => event)
+    .sort((left, right) => left.agentId.localeCompare(right.agentId));
+  const sourceEvents = timelineMode === "agents" ? latestEventsByAgent : run.events.slice(-32).reverse();
+  const visibleEvents = sourceEvents.filter((event) => {
+    if (personaFilter !== "all" && event.persona !== personaFilter) {
+      return false;
+    }
+
+    if (outcomeFilter === "succeeded" && !event.actionOk) {
+      return false;
+    }
+
+    if (outcomeFilter === "failed" && event.actionOk) {
+      return false;
+    }
+
+    return true;
+  });
+  const latestEventMap = latestEventsByAgent.reduce(
+    (map, event) => {
+      map[event.agentId] = event;
+      return map;
+    },
+    {} as Record<string, RunRecord["events"][number]>,
+  );
 
   return (
     <main className="mx-auto flex min-h-screen w-full max-w-7xl flex-col px-6 py-8 lg:px-10">
@@ -89,6 +123,124 @@ export function RunMonitor({ initialRun }: RunMonitorProps) {
         <MetricCard label="Peak frustration" value={`${run.summary.peakFrustration}%`} tone="danger" />
       </section>
 
+      <section className="mt-8 panel rounded-[2rem] p-7">
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <div>
+            <p className="text-sm uppercase tracking-[0.25em] text-[var(--muted)]">Swarm board</p>
+            <h2 className="mt-2 text-3xl font-semibold tracking-tight">What each persona is doing right now</h2>
+          </div>
+          <p className="text-sm text-[var(--muted)]">
+            {run.status === "completed"
+              ? "Final state per agent."
+              : run.status === "failed"
+                ? "Last known state before the run failed."
+                : "Live state, refreshed every 1.2s."}
+          </p>
+        </div>
+
+        <div className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+          {run.agentRuns.length === 0 ? (
+            <div className="rounded-[1.3rem] border border-[var(--line)] bg-white/60 px-4 py-4 text-sm text-[var(--muted)] md:col-span-2 xl:col-span-3">
+              Agents have not emitted any state yet. The first browser contexts are still warming up.
+            </div>
+          ) : (
+            run.agentRuns
+              .slice()
+              .sort((left, right) => left.agentId.localeCompare(right.agentId))
+              .map((agentRun) => {
+                const latestEvent = latestEventMap[agentRun.agentId];
+
+                return (
+                  <article key={agentRun.agentId} className="rounded-[1.4rem] border border-[var(--line)] bg-white/60 p-4">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div>
+                        <p className="font-semibold">{agentRun.agentId}</p>
+                        <p className="mt-1 text-xs uppercase tracking-[0.16em] text-[var(--muted)]">
+                          {formatPersonaLabel(agentRun.persona.archetype)}
+                        </p>
+                      </div>
+                      <span
+                        className={`rounded-full px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] ${agentStatusPalette(agentRun)}`}
+                      >
+                        {agentRun.failed ? "failed" : agentRun.completed ? "completed" : "running"}
+                      </span>
+                    </div>
+
+                    {latestEvent ? (
+                      <>
+                        <div className="mt-4 flex flex-wrap items-center gap-2">
+                          {latestEvent.stageLabel ? (
+                            <span className="rounded-full bg-[rgba(200,76,38,0.1)] px-2 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-[var(--accent)]">
+                              {latestEvent.stageLabel}
+                            </span>
+                          ) : null}
+                          <span className="rounded-full bg-white/70 px-2 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-[var(--muted)]">
+                            step {latestEvent.step}
+                          </span>
+                        </div>
+                        <p className="mt-3 text-base font-semibold">{latestEvent.title}</p>
+                        <p className="mt-1 text-sm leading-7 text-[var(--muted)]">{latestEvent.detail}</p>
+                        <p className="mt-3 text-xs uppercase tracking-[0.16em] text-[var(--muted)]">Why</p>
+                        <p className="mt-1 text-sm leading-7 text-[var(--muted)]">{latestEvent.rationale}</p>
+                        <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                          <div className="rounded-[1rem] bg-[rgba(23,20,18,0.04)] px-3 py-3">
+                            <p className="text-[11px] uppercase tracking-[0.14em] text-[var(--muted)]">Emotion</p>
+                            <p className="mt-1 text-sm">
+                              {latestEvent.frustration}% frustration / {latestEvent.confidence}% confidence
+                            </p>
+                          </div>
+                          <div className="rounded-[1rem] bg-[rgba(23,20,18,0.04)] px-3 py-3">
+                            <p className="text-[11px] uppercase tracking-[0.14em] text-[var(--muted)]">Technical state</p>
+                            <p className="mt-1 text-sm text-[var(--muted)]">
+                              {latestEvent.actionCode} on a {latestEvent.loadState} page
+                            </p>
+                          </div>
+                        </div>
+                      </>
+                    ) : (
+                      <p className="mt-4 text-sm leading-7 text-[var(--muted)]">
+                        This agent has been allocated but has not emitted a step yet.
+                      </p>
+                    )}
+                  </article>
+                );
+              })
+          )}
+        </div>
+      </section>
+
+      {run.personaSummary.length > 0 ? (
+        <section className="mt-8 grid gap-5 lg:grid-cols-3">
+          {run.personaSummary.map((persona) => (
+            <div key={persona.archetype} className="panel rounded-[1.7rem] p-5">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-sm uppercase tracking-[0.2em] text-[var(--muted)]">
+                    {formatPersonaLabel(persona.archetype)}
+                  </p>
+                  <p className="mt-2 text-3xl font-semibold tracking-tight">{persona.total}</p>
+                </div>
+                <span
+                  className={`rounded-full px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] ${personaTone(persona.archetype)}`}
+                >
+                  persona
+                </span>
+              </div>
+              <div className="mt-4 grid grid-cols-2 gap-3 text-sm text-[var(--muted)]">
+                <div className="rounded-[1rem] bg-white/60 px-3 py-3">
+                  <p className="text-[11px] uppercase tracking-[0.14em]">Completed</p>
+                  <p className="mt-1 text-lg font-semibold text-[var(--foreground)]">{persona.completed}</p>
+                </div>
+                <div className="rounded-[1rem] bg-white/60 px-3 py-3">
+                  <p className="text-[11px] uppercase tracking-[0.14em]">Failed</p>
+                  <p className="mt-1 text-lg font-semibold text-[var(--foreground)]">{persona.failed}</p>
+                </div>
+              </div>
+            </div>
+          ))}
+        </section>
+      ) : null}
+
       <section className="mt-8 grid gap-6 lg:grid-cols-[1.15fr_0.85fr]">
         <article className="panel rounded-[2rem] p-7">
           <div className="flex items-center justify-between gap-4">
@@ -110,7 +262,9 @@ export function RunMonitor({ initialRun }: RunMonitorProps) {
                     style={{ width: `${Math.min(100, (stage.reached / Math.max(run.agentCount, 1)) * 100)}%` }}
                   />
                 </div>
-                <p className="mt-2 text-sm text-[var(--muted)]">{stage.stuck} agents encountered visible friction here.</p>
+                <p className="mt-2 text-sm text-[var(--muted)]">
+                  {stage.stuck} agents encountered visible friction here.
+                </p>
               </div>
             ))}
           </div>
@@ -147,22 +301,71 @@ export function RunMonitor({ initialRun }: RunMonitorProps) {
       </section>
 
       <section className="mt-8 panel rounded-[2rem] p-7">
-        <div className="flex items-center justify-between gap-4">
+        <div className="flex flex-wrap items-center justify-between gap-4">
           <div>
             <p className="text-sm uppercase tracking-[0.25em] text-[var(--muted)]">Timeline</p>
             <h2 className="mt-2 text-3xl font-semibold tracking-tight">Synthetic event stream</h2>
           </div>
-          <p className="text-sm text-[var(--muted)]">
-            {run.status === "completed" ? "Run finished." : run.status === "failed" ? "Run failed." : "Live polling every 1.2s."}
-          </p>
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="flex overflow-hidden rounded-full border border-[var(--line)] bg-white/70">
+              <button
+                type="button"
+                onClick={() => setTimelineMode("agents")}
+                className={`px-4 py-2 text-sm font-semibold ${
+                  timelineMode === "agents" ? "bg-[var(--accent)] text-white" : "text-[var(--muted)]"
+                }`}
+              >
+                Latest per agent
+              </button>
+              <button
+                type="button"
+                onClick={() => setTimelineMode("feed")}
+                className={`px-4 py-2 text-sm font-semibold ${
+                  timelineMode === "feed" ? "bg-[var(--accent)] text-white" : "text-[var(--muted)]"
+                }`}
+              >
+                Full feed
+              </button>
+            </div>
+            <select
+              value={personaFilter}
+              onChange={(event) => setPersonaFilter(event.target.value as "all" | "Speedrunner" | "Novice" | "ChaosAgent")}
+              className="rounded-full border border-[var(--line)] bg-white/70 px-4 py-2 text-sm text-[var(--foreground)]"
+            >
+              <option value="all">All personas</option>
+              <option value="Speedrunner">Speedrunner</option>
+              <option value="Novice">Novice</option>
+              <option value="ChaosAgent">Chaos Agent</option>
+            </select>
+            <select
+              value={outcomeFilter}
+              onChange={(event) => setOutcomeFilter(event.target.value as "all" | "succeeded" | "failed")}
+              className="rounded-full border border-[var(--line)] bg-white/70 px-4 py-2 text-sm text-[var(--foreground)]"
+            >
+              <option value="all">All outcomes</option>
+              <option value="succeeded">Succeeded only</option>
+              <option value="failed">Failed only</option>
+            </select>
+            <p className="text-sm text-[var(--muted)]">
+              {run.status === "completed"
+                ? "Run finished."
+                : run.status === "failed"
+                  ? "Run failed."
+                  : "Live polling every 1.2s."}
+            </p>
+          </div>
         </div>
         <div className="mt-6 space-y-3">
           {run.events.length === 0 ? (
             <div className="rounded-[1.3rem] border border-[var(--line)] bg-white/60 px-4 py-4 text-sm text-[var(--muted)]">
               No events have been captured yet. The worker is still warming up the first browser context.
             </div>
+          ) : visibleEvents.length === 0 ? (
+            <div className="rounded-[1.3rem] border border-[var(--line)] bg-white/60 px-4 py-4 text-sm text-[var(--muted)]">
+              No timeline events match the current filters.
+            </div>
           ) : (
-            run.events.slice(-24).reverse().map((event) => (
+            visibleEvents.map((event) => (
               <div
                 key={event.id}
                 className="grid gap-3 rounded-[1.3rem] border border-[var(--line)] bg-white/60 px-4 py-4 lg:grid-cols-[1.2fr_0.8fr_0.8fr_1.2fr]"
@@ -232,6 +435,38 @@ function MetricCard({
       </p>
     </div>
   );
+}
+
+function formatPersonaLabel(archetype: "Speedrunner" | "Novice" | "ChaosAgent") {
+  if (archetype === "ChaosAgent") {
+    return "Chaos Agent";
+  }
+
+  return archetype;
+}
+
+function personaTone(archetype: "Speedrunner" | "Novice" | "ChaosAgent") {
+  if (archetype === "Speedrunner") {
+    return "bg-[rgba(36,107,168,0.1)] text-[rgb(36,107,168)]";
+  }
+
+  if (archetype === "ChaosAgent") {
+    return "bg-[rgba(181,41,23,0.1)] text-[var(--danger)]";
+  }
+
+  return "bg-[rgba(32,109,71,0.1)] text-[var(--success)]";
+}
+
+function agentStatusPalette(agentRun: RunRecord["agentRuns"][number]) {
+  if (agentRun.failed) {
+    return "bg-[rgba(181,41,23,0.1)] text-[var(--danger)]";
+  }
+
+  if (agentRun.completed) {
+    return "bg-[rgba(32,109,71,0.1)] text-[var(--success)]";
+  }
+
+  return "bg-[rgba(200,76,38,0.1)] text-[var(--accent)]";
 }
 
 function StatusBadge({ status }: { status: RunRecord["status"] }) {
