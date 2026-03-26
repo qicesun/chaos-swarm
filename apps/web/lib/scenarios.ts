@@ -165,8 +165,8 @@ export const scenarioCatalog: Record<DemoScenarioId, DemoScenarioDefinition> = {
     targetUrl: "https://parabank.parasoft.com/parabank/register.htm",
     goal: "Create a new demo banking account and reach the signed-in dashboard.",
     description: "Finance-style onboarding flow with a denser registration form and a post-submit account-services surface.",
-    recommendedMaxSteps: 4,
-    minimumMaxSteps: 4,
+    recommendedMaxSteps: 6,
+    minimumMaxSteps: 5,
     frames: [
       {
         id: "registration-form",

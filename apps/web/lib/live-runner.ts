@@ -9,6 +9,12 @@ import type {
   LoadState,
   PageState,
 } from "@chaos-swarm/agent-core";
+import { buildScenarioPlaybook } from "./agent-playbook";
+import {
+  decideNextAction,
+  type ObservedCandidate,
+  type ParsedAgentDecision,
+} from "./openai-agent";
 import type { DemoScenarioDefinition } from "./scenarios";
 
 const BLOCKED_SURFACE_PATTERN = /invalid ssl certificate|attention required|cloudflare|robot or human|access denied|verify you are human|automated access/i;
@@ -26,6 +32,26 @@ interface LiveSwarmOptions extends LiveSwarmCallbacks {
   maxSteps: number;
   personas: AgentPersona[];
   runId: string;
+}
+
+interface InteractiveCandidate {
+  id: string;
+  text: string;
+  tagName: string;
+  role: string;
+  selector?: string;
+  placeholder?: string;
+  ariaLabel?: string;
+  href?: string;
+  inputType?: string;
+  surfaceLabel?: string;
+  viewportState: "visible" | "below_fold" | "above_fold";
+  disabled: boolean;
+  selectOptions: string[];
+  x: number;
+  y: number;
+  width: number;
+  height: number;
 }
 
 function clamp(value: number, min: number, max: number) {
@@ -99,6 +125,10 @@ function summarizeTargets(targets: string[]) {
   return targets.length ? targets.slice(0, 4).join(", ") : "no obvious targets";
 }
 
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 function summarizeStep(step: number, page: PageState, frustration: number, persona: AgentPersona, details: string) {
   return [
     `step ${step}`,
@@ -128,26 +158,406 @@ async function currentLoadState(page: Page): Promise<LoadState> {
   }
 }
 
-async function extractVisibleTargets(page: Page): Promise<string[]> {
+async function extractInteractiveCandidates(page: Page): Promise<InteractiveCandidate[]> {
   try {
-    return await page
-      .locator("button, a, input, textarea, select, [role='button'], [aria-label], [placeholder]")
-      .evaluateAll((nodes) =>
-        nodes
-          .map((node) => {
-            const element = node as HTMLElement;
-            const label =
-              element.innerText?.trim() ||
-              element.getAttribute("aria-label") ||
-              element.getAttribute("placeholder") ||
-              (element as HTMLInputElement).value ||
-              "";
+    return await page.evaluate(() => {
+      function cssString(value: string) {
+        return value.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+      }
 
-            return label.replace(/\s+/g, " ").trim();
-          })
-          .filter(Boolean)
-          .slice(0, 20),
+      function buildSelector(element: HTMLElement) {
+        const tag = element.tagName.toLowerCase();
+        const name = element.getAttribute("name");
+        const visibleText = (element.innerText || element.textContent || "").replace(/\s+/g, " ").trim();
+
+        if (name) {
+          return `${tag}[name="${cssString(name)}"]`;
+        }
+
+        const id = element.getAttribute("id");
+
+        if (id) {
+          return `#${CSS.escape(id)}`;
+        }
+
+        const href = element.getAttribute("href");
+
+        if (href && tag === "a") {
+          if (visibleText) {
+            return `a[href="${cssString(href)}"]:has-text("${cssString(visibleText)}")`;
+          }
+
+          return `a[href="${cssString(href)}"]`;
+        }
+
+        const ariaLabel = element.getAttribute("aria-label");
+
+        if (ariaLabel) {
+          return `${tag}[aria-label="${cssString(ariaLabel)}"]`;
+        }
+
+        const placeholder = element.getAttribute("placeholder");
+
+        if (placeholder) {
+          return `${tag}[placeholder="${cssString(placeholder)}"]`;
+        }
+
+        const value = element.getAttribute("value");
+
+        if (value) {
+          return `${tag}[value="${cssString(value)}"]`;
+        }
+
+        const type = element.getAttribute("type");
+
+        if (type) {
+          return `${tag}[type="${cssString(type)}"]`;
+        }
+
+        return undefined;
+      }
+
+      function cleanText(value: string | null | undefined) {
+        return (value ?? "").replace(/\s+/g, " ").trim();
+      }
+
+      function humanizeIdentifier(value: string | null | undefined) {
+        const normalized = cleanText(value);
+
+        if (!normalized) {
+          return "";
+        }
+
+        return normalized
+          .replace(/([a-z])([A-Z])/g, "$1 $2")
+          .replace(/[_-]+/g, " ")
+          .replace(/(contact)(number)/gi, "$1 $2")
+          .replace(/(pickup)(date)/gi, "$1 $2")
+          .replace(/(payment)(method)/gi, "$1 $2")
+          .replace(/\b\w/g, (character) => character.toUpperCase());
+      }
+
+      function labelText(element: HTMLElement) {
+        const native = element as HTMLInputElement & {
+          labels?: NodeListOf<HTMLLabelElement>;
+        };
+        const directLabels = Array.from(native.labels ?? [])
+          .map((label) => cleanText(label.textContent))
+          .filter(Boolean);
+        const inputType = cleanText(element.getAttribute("type")).toLowerCase();
+
+        function labelMatchesInputType(label: string) {
+          return inputType === "date"
+            ? /date|pickup/i.test(label)
+            : inputType === "tel"
+              ? /contact|phone|number/i.test(label)
+              : inputType === "password"
+                ? /password/i.test(label)
+                : true;
+        }
+
+        if (directLabels.length > 1) {
+          const preferred =
+            (inputType === "tel"
+              ? directLabels.find((label) => /contact|phone|number/i.test(label))
+              : undefined) ||
+            (inputType === "date"
+              ? directLabels.find((label) => /date|pickup/i.test(label))
+              : undefined) ||
+            (inputType === "password"
+              ? directLabels.find((label) => /password/i.test(label))
+              : undefined);
+
+          if (preferred) {
+            return preferred;
+          }
+        }
+
+        const direct = directLabels[0];
+
+        if (direct && labelMatchesInputType(direct)) {
+          return direct;
+        }
+
+        const id = element.getAttribute("id");
+
+        if (id) {
+          const explicit = cleanText(document.querySelector(`label[for="${id}"]`)?.textContent);
+
+          if (explicit && labelMatchesInputType(explicit)) {
+            return explicit;
+          }
+        }
+
+        const parentLabel = cleanText(element.closest("label")?.textContent);
+
+        if (parentLabel) {
+          return parentLabel;
+        }
+
+        const previousLabel =
+          element.previousElementSibling instanceof HTMLLabelElement
+            ? cleanText(element.previousElementSibling.textContent)
+            : "";
+
+        const previousLabelLooksValid =
+          !previousLabel
+            ? false
+            : inputType === "date"
+              ? /date|pickup/i.test(previousLabel)
+              : inputType === "tel"
+                ? /contact|phone|number/i.test(previousLabel)
+                : true;
+
+        if (previousLabelLooksValid) {
+          return previousLabel;
+        }
+
+        return (
+          humanizeIdentifier(element.getAttribute("name")) ||
+          humanizeIdentifier(element.getAttribute("id"))
+        );
+      }
+
+      function describeElement(element: HTMLElement) {
+        const productCard = element.closest(".product-image-wrapper, .single-products, .features_items .col-sm-4");
+        const productName =
+          Array.from(productCard?.querySelectorAll<HTMLElement>("p, h2, h3, h4") ?? [])
+            .map((node) => cleanText(node.textContent))
+            .find(
+              (text) =>
+                text &&
+                !/^rs\./i.test(text) &&
+                !/^(add to cart|view product)$/i.test(text),
+            ) ?? "";
+        const href = cleanText(element.getAttribute("href")).toLowerCase();
+        const className = cleanText(element.getAttribute("class")).toLowerCase();
+        const name = cleanText(element.getAttribute("name")).toLowerCase();
+        const id = cleanText(element.getAttribute("id")).toLowerCase();
+        const inCartModal = Boolean(element.closest("#cartModal"));
+
+        if (/view_cart/.test(href) && inCartModal) {
+          return "View Cart";
+        }
+
+        if (/shopping_cart|view_cart|\/cart/.test(`${href} ${className} ${name} ${id}`)) {
+          return "Shopping Cart";
+        }
+
+        if (/product_details/.test(href)) {
+          return productName ? `View Product ${productName}` : "View Product";
+        }
+
+        if (/submit_search/.test(`${className} ${name} ${id}`)) {
+          return "Submit Search";
+        }
+
+        const inlineText = cleanText(element.innerText) || cleanText(element.textContent);
+
+        if (/^add to cart$/i.test(inlineText) && productName) {
+          return `Add to cart ${productName}`;
+        }
+
+        return (
+          labelText(element) ||
+          inlineText ||
+          cleanText(element.getAttribute("aria-label")) ||
+          cleanText(element.getAttribute("placeholder")) ||
+          cleanText((element as HTMLInputElement).value) ||
+          humanizeIdentifier(element.getAttribute("name")) ||
+          humanizeIdentifier(element.getAttribute("id")) ||
+          cleanText(element.getAttribute("title")) ||
+          cleanText(element.tagName)
+        );
+      }
+
+      function findSurfaceLabel(element: HTMLElement) {
+        const elementRect = element.getBoundingClientRect();
+        const elementCenterX = elementRect.left + elementRect.width / 2;
+        const headings = Array.from(
+          document.querySelectorAll<HTMLElement>("h1, h2, h3, legend, .title, .captionone, .captiontwo"),
+        )
+          .map((heading) => ({
+            text: cleanText(heading.textContent),
+            rect: heading.getBoundingClientRect(),
+          }))
+          .filter((heading) => heading.text);
+
+        let bestLabel = "";
+        let bestScore = Number.POSITIVE_INFINITY;
+
+        for (const heading of headings) {
+          if (heading.rect.bottom > elementRect.top + 28) {
+            continue;
+          }
+
+          const verticalGap = elementRect.top - heading.rect.bottom;
+
+          if (verticalGap > 520) {
+            continue;
+          }
+
+          const headingCenterX = heading.rect.left + heading.rect.width / 2;
+          const horizontalGap = Math.abs(headingCenterX - elementCenterX);
+          const score = verticalGap + horizontalGap * 0.45;
+
+          if (score < bestScore) {
+            bestScore = score;
+            bestLabel = heading.text;
+          }
+        }
+
+        return bestLabel || undefined;
+      }
+
+      const nodes = Array.from(
+        document.querySelectorAll<HTMLElement>(
+          "button, a, input, textarea, select, [role='button'], [aria-label], [placeholder]",
+        ),
       );
+
+      const ranked = nodes
+        .map((element, index) => {
+          const rect = element.getBoundingClientRect();
+          const style = window.getComputedStyle(element);
+
+          if (
+            rect.width < 8 ||
+            rect.height < 8 ||
+            rect.bottom < -240 ||
+            rect.right < 0 ||
+            rect.top > window.innerHeight * 1.4 ||
+            rect.left > window.innerWidth ||
+            style.display === "none" ||
+            style.visibility === "hidden" ||
+            style.opacity === "0"
+          ) {
+            return null;
+          }
+
+          const viewportState =
+            rect.bottom < 0
+              ? "above_fold"
+              : rect.top > window.innerHeight
+                ? "below_fold"
+                : "visible";
+
+          const text = describeElement(element);
+
+          if (!text) {
+            return null;
+          }
+
+          const selectOptions =
+            element instanceof HTMLSelectElement
+              ? Array.from(element.options)
+                  .map((option) => cleanText(option.textContent))
+                  .filter(Boolean)
+                  .slice(0, 12)
+              : [];
+          const surfaceLabel = findSurfaceLabel(element);
+          const lowerText = text.toLowerCase();
+          const ctaPriority = /view product/.test(lowerText)
+            ? -4
+            : /shopping cart|view cart|checkout|open new account|logout/.test(lowerText)
+              ? -3
+              : /login|register|search|submit|continue|cart|add to cart/.test(lowerText)
+                ? -2
+                : 0;
+          const withinFormPriority = element.closest("form") ? -1 : 0;
+          const surfacePriority = /customer login/i.test(surfaceLabel ?? "") ? 1 : 0;
+          const controlPriority =
+            element.tagName === "INPUT" ||
+            element.tagName === "TEXTAREA" ||
+            element.tagName === "SELECT" ||
+            element.tagName === "BUTTON"
+              ? -1
+              : 0;
+
+          return {
+            id: `c${index + 1}`,
+            text,
+            tagName: element.tagName.toLowerCase(),
+            role: element.getAttribute("role") || element.tagName.toLowerCase(),
+            selector: buildSelector(element),
+            placeholder: element.getAttribute("placeholder") || undefined,
+            ariaLabel: element.getAttribute("aria-label") || undefined,
+            href: element.getAttribute("href") || undefined,
+            inputType: element.getAttribute("type") || undefined,
+            surfaceLabel,
+            viewportState,
+            disabled:
+              element.hasAttribute("disabled") ||
+              element.getAttribute("aria-disabled") === "true",
+            selectOptions,
+            x: rect.x,
+            y: rect.y,
+            width: rect.width,
+            height: rect.height,
+            priority: ctaPriority + withinFormPriority + controlPriority + surfacePriority,
+          };
+        })
+        .filter(Boolean)
+        .sort((left, right) => {
+          if (!left || !right) {
+            return 0;
+          }
+
+          if (left.priority !== right.priority) {
+            return left.priority - right.priority;
+          }
+
+          if (left.viewportState !== right.viewportState) {
+            return left.viewportState === "visible"
+              ? -1
+              : right.viewportState === "visible"
+                ? 1
+                : left.viewportState === "below_fold"
+                  ? -1
+                  : 1;
+          }
+
+          if (Math.abs(left.y - right.y) > 6) {
+            return left.y - right.y;
+          }
+
+          return left.x - right.x;
+        }) as Array<{
+          id: string;
+          text: string;
+          tagName: string;
+          role: string;
+          selector?: string;
+          placeholder?: string;
+          ariaLabel?: string;
+          href?: string;
+          inputType?: string;
+          surfaceLabel?: string;
+          viewportState: "visible" | "below_fold" | "above_fold";
+          disabled: boolean;
+          selectOptions: string[];
+          x: number;
+          y: number;
+          width: number;
+          height: number;
+          priority: number;
+        }>;
+
+      const duplicateCounts = new Map<string, number>();
+
+      return ranked.filter((candidate) => {
+        const key = candidate.text.toLowerCase();
+        const seen = duplicateCounts.get(key) ?? 0;
+        const maxDuplicates = /add to cart|view product/.test(key) ? 1 : 2;
+
+        if (seen >= maxDuplicates) {
+          return false;
+        }
+
+        duplicateCounts.set(key, seen + 1);
+        return true;
+      }).slice(0, 24);
+    });
   } catch {
     return [];
   }
@@ -190,6 +600,16 @@ async function assertUsableSurface(page: Page) {
   }
 }
 
+async function dismissInterruptingSurface(page: Page) {
+  if (!page.url().includes("#google_vignette")) {
+    return;
+  }
+
+  await page.goBack({ waitUntil: "domcontentloaded", timeout: 8_000 }).catch(() => undefined);
+  await page.keyboard.press("Escape").catch(() => undefined);
+  await sleep(250);
+}
+
 async function gotoWithRetry(page: Page, url: string, options: Parameters<Page["goto"]>[1], attempts = 2) {
   let lastError: unknown;
 
@@ -210,97 +630,10 @@ async function gotoWithRetry(page: Page, url: string, options: Parameters<Page["
   throw lastError instanceof Error ? lastError : new Error(String(lastError));
 }
 
-async function resolveFirstHref(page: Page, candidates: Array<() => Locator>) {
-  for (const buildLocator of candidates) {
-    const locator = buildLocator().first();
-
-    try {
-      if ((await locator.count()) === 0) {
-        continue;
-      }
-
-      const href = await locator.getAttribute("href");
-
-      if (href) {
-        return new URL(href, page.url()).toString();
-      }
-    } catch {
-      // Ignore noisy locator reads and continue to the next candidate.
-    }
-  }
-
-  return undefined;
-}
-
-interface SurfaceWaitOptions {
-  label: string;
-  timeout?: number;
-  urlPattern?: RegExp;
-  locatorBuilders?: Array<() => Locator>;
-}
-
-async function waitForSurface(page: Page, options: SurfaceWaitOptions) {
-  const timeout = options.timeout ?? 12_000;
-  const startedAt = Date.now();
-
-  while (Date.now() - startedAt < timeout) {
-    await assertUsableSurface(page);
-
-    if (options.urlPattern?.test(page.url())) {
-      return;
-    }
-
-    for (const buildLocator of options.locatorBuilders ?? []) {
-      const locator = buildLocator().first();
-
-      try {
-        if ((await locator.count()) === 0) {
-          continue;
-        }
-
-        if (await locator.isVisible().catch(() => false)) {
-          return;
-        }
-      } catch {
-        // Ignore transient locator failures while polling for the next surface.
-      }
-    }
-
-    await sleep(250);
-  }
-
-  const title = await page.title().catch(() => "");
-  const suffix = title ? ` (${title})` : "";
-  throw new Error(`Timed out waiting for ${options.label} at ${page.url()}${suffix}`);
-}
-
-async function clickThenConfirmSurface(
-  page: Page,
-  label: string,
-  candidates: Array<() => Locator>,
-  confirmation: SurfaceWaitOptions & { fallbackUrl?: string },
-) {
-  await clickWithFallback(page, label, candidates);
-
-  try {
-    await waitForSurface(page, confirmation);
-  } catch (error) {
-    if (!confirmation.fallbackUrl) {
-      throw error;
-    }
-
-    await gotoWithRetry(page, confirmation.fallbackUrl, {
-      waitUntil: "domcontentloaded",
-      timeout: confirmation.timeout ?? 15_000,
-    });
-    await waitForSurface(page, confirmation);
-  }
-}
-
 async function snapshotPage(page: Page, fallbackUrl: string, explicitFlags: string[] = []): Promise<PageState> {
   const url = page.url() || fallbackUrl;
   const title = await page.title().catch(() => undefined);
-  const visibleTargets = await extractVisibleTargets(page);
+  const visibleTargets = (await extractInteractiveCandidates(page)).map((candidate) => candidate.text).slice(0, 40);
   const errorFlags = await extractErrorFlags(page, explicitFlags);
   let loadState = await currentLoadState(page);
 
@@ -348,6 +681,493 @@ async function clickWithFallback(page: Page, label: string, candidates: Array<()
   }
 
   throw lastError ?? new Error(`Unable to locate ${label}`);
+}
+
+function candidateLocators(page: Page, candidate: InteractiveCandidate) {
+  const candidates: Array<() => Locator> = [];
+
+  if (candidate.selector) {
+    candidates.push(() => page.locator(candidate.selector!));
+  }
+
+  if (candidate.href) {
+    candidates.push(() => page.locator(`a[href="${candidate.href}"]`));
+  }
+
+  if (candidate.placeholder) {
+    const placeholder = new RegExp(escapeRegExp(candidate.placeholder), "i");
+    candidates.push(() => page.getByPlaceholder(placeholder));
+  }
+
+  if (candidate.ariaLabel) {
+    const ariaLabel = new RegExp(escapeRegExp(candidate.ariaLabel), "i");
+    candidates.push(() => page.getByLabel(ariaLabel));
+  }
+
+  if (candidate.text) {
+    const label = new RegExp(escapeRegExp(candidate.text), "i");
+
+    if (candidate.tagName === "a" || candidate.role === "link") {
+      candidates.push(() => page.getByRole("link", { name: label }));
+    }
+
+    if (
+      candidate.tagName === "button" ||
+      candidate.role === "button" ||
+      candidate.inputType === "submit" ||
+      candidate.inputType === "button"
+    ) {
+      candidates.push(() => page.getByRole("button", { name: label }));
+    }
+
+    if (
+      candidate.tagName === "input" ||
+      candidate.tagName === "textarea" ||
+      candidate.tagName === "select"
+    ) {
+      candidates.push(() => page.getByLabel(label));
+    }
+
+    candidates.push(() => page.getByLabel(label));
+    candidates.push(() => page.getByText(label).first());
+  }
+
+  return candidates;
+}
+
+function resolveCandidate(
+  decision: ParsedAgentDecision,
+  candidates: InteractiveCandidate[],
+) {
+  if (decision.nextAction.targetId) {
+    const byId = findCandidateByReference(decision.nextAction.targetId, candidates);
+
+    if (byId) {
+      return byId;
+    }
+  }
+
+  if (decision.nextAction.targetText) {
+    const lowered = decision.nextAction.targetText.toLowerCase();
+
+    return candidates.find((candidate) => candidate.text.toLowerCase().includes(lowered));
+  }
+
+  return undefined;
+}
+
+function findCandidateByReference(reference: string, candidates: InteractiveCandidate[]) {
+  const lowered = reference.toLowerCase();
+
+  return candidates.find(
+    (candidate) =>
+      candidate.id === reference ||
+      candidate.selector === reference ||
+      candidate.text.toLowerCase() === lowered ||
+      candidate.text.toLowerCase().includes(lowered) ||
+      candidate.placeholder?.toLowerCase() === lowered ||
+      candidate.ariaLabel?.toLowerCase() === lowered,
+  );
+}
+
+function interactionPoint(candidate: InteractiveCandidate) {
+  const insetX = Math.min(10, Math.max(candidate.width * 0.15, 3));
+  const insetY = Math.min(8, Math.max(candidate.height * 0.2, 3));
+
+  return {
+    x: candidate.x + clamp(candidate.width / 2, insetX, candidate.width - insetX),
+    y: candidate.y + clamp(candidate.height / 2, insetY, candidate.height - insetY),
+  };
+}
+
+async function focusCandidateByPoint(page: Page, candidate: InteractiveCandidate) {
+  const point = interactionPoint(candidate);
+  await page.mouse.move(point.x, point.y, { steps: 6 }).catch(() => undefined);
+  await page.mouse.click(point.x, point.y, { delay: 40 });
+}
+
+async function pageFingerprint(page: Page) {
+  const url = page.url();
+  const title = await page.title().catch(() => "");
+  const bodyPreview = await page
+    .evaluate(() => document.body.innerText.replace(/\s+/g, " ").trim().slice(0, 240))
+    .catch(() => "");
+
+  return `${url}::${title}::${bodyPreview}`;
+}
+
+function candidateLikelyNavigates(candidate: InteractiveCandidate) {
+  const text = candidate.text.toLowerCase();
+
+  return (
+    candidate.tagName === "a" ||
+    candidate.role === "link" ||
+    /shopping cart|view cart|view product|login|register|submit search|continue|checkout|logout|open new account/.test(
+      text,
+    )
+  );
+}
+
+async function clickCandidate(page: Page, candidate: InteractiveCandidate) {
+  if (candidate.disabled) {
+    throw new Error(`Target "${candidate.text}" is disabled.`);
+  }
+
+  const shouldVerify = candidateLikelyNavigates(candidate);
+  const beforeUrl = page.url();
+  const beforeFingerprint = shouldVerify ? await pageFingerprint(page) : "";
+
+  try {
+    await focusCandidateByPoint(page, candidate);
+    await sleep(250);
+
+    if (
+      !shouldVerify ||
+      page.url() !== beforeUrl ||
+      (await pageFingerprint(page)) !== beforeFingerprint
+    ) {
+      return;
+    }
+  } catch {
+    // Fall through to DOM fallback.
+  }
+
+  await clickWithFallback(page, candidate.text, candidateLocators(page, candidate));
+}
+
+async function selectCandidateOption(page: Page, candidate: InteractiveCandidate, value: string) {
+  const desired = value.trim().toLowerCase();
+
+  for (const buildLocator of candidateLocators(page, candidate)) {
+    const locator = buildLocator().first();
+
+    try {
+      if ((await locator.count()) === 0) {
+        continue;
+      }
+
+      const tagName = await locator.evaluate((node) => node.tagName.toLowerCase()).catch(() => "");
+
+      if (tagName !== "select") {
+        continue;
+      }
+
+      const options = await locator.locator("option").evaluateAll((nodes) =>
+        nodes.map((node) => ({
+          label: (node.textContent ?? "").replace(/\s+/g, " ").trim(),
+          value: (node as HTMLOptionElement).value,
+        })),
+      );
+      const exact =
+        options.find((option) => option.label.toLowerCase() === desired) ??
+        options.find((option) => option.value.toLowerCase() === desired) ??
+        options.find((option) => option.label.toLowerCase().includes(desired));
+
+      if (!exact) {
+        continue;
+      }
+
+      await locator.selectOption({ value: exact.value });
+      return;
+    } catch {
+      // Try the next locator candidate.
+    }
+  }
+
+  throw new Error(`Unable to select "${value}" for ${candidate.text}.`);
+}
+
+async function fillCandidate(page: Page, candidate: InteractiveCandidate, value: string) {
+  if (candidate.disabled) {
+    throw new Error(`Target "${candidate.text}" is disabled.`);
+  }
+
+  if (candidate.tagName === "select" || candidate.role === "combobox") {
+    try {
+      await focusCandidateByPoint(page, candidate);
+      await page.keyboard.type(value, { delay: 35 });
+      await page.keyboard.press("Enter").catch(() => undefined);
+      await sleep(150);
+
+      if (candidate.selector) {
+        const selectedText = await page
+          .locator(candidate.selector)
+          .evaluate((node) => {
+            if (!(node instanceof HTMLSelectElement)) {
+              return "";
+            }
+
+            return node.selectedOptions[0]?.textContent?.replace(/\s+/g, " ").trim() ?? "";
+          })
+          .catch(() => "");
+
+        if (selectedText && selectedText.toLowerCase().includes(value.trim().toLowerCase())) {
+          return;
+        }
+      }
+    } catch {
+      // Fall through to DOM fallback for native selects.
+    }
+
+    await selectCandidateOption(page, candidate, value);
+    return;
+  }
+
+  try {
+    await focusCandidateByPoint(page, candidate);
+    await page.keyboard.press("Control+A").catch(() => undefined);
+    await page.keyboard.press("Backspace").catch(() => undefined);
+    await page.keyboard.type(value, { delay: 28 });
+
+    if (candidate.selector) {
+      const typedValue = await page.locator(candidate.selector).inputValue().catch(() => "");
+
+      if (typedValue === value) {
+        return;
+      }
+    } else {
+      return;
+    }
+  } catch {
+    // Fall through to DOM fallback.
+  }
+
+  for (const buildLocator of candidateLocators(page, candidate)) {
+    const locator = buildLocator().first();
+
+    try {
+      if ((await locator.count()) === 0) {
+        continue;
+      }
+
+      if (await locator.isEditable().catch(() => false)) {
+        await locator.fill(value, { timeout: 8_000 });
+        return;
+      }
+
+      if (await locator.isVisible().catch(() => false)) {
+        await locator.click({ timeout: 8_000 });
+        await page.keyboard.press("Control+A").catch(() => undefined);
+        await page.keyboard.type(value, { delay: 28 });
+        return;
+      }
+    } catch {
+      // Fall through to the next locator or coordinate fallback.
+    }
+  }
+
+  await focusCandidateByPoint(page, candidate);
+  await page.keyboard.press("Control+A").catch(() => undefined);
+  await page.keyboard.press("Backspace").catch(() => undefined);
+  await page.keyboard.type(value, { delay: 28 });
+}
+
+async function fillFieldSet(
+  page: Page,
+  decision: ParsedAgentDecision,
+  candidates: InteractiveCandidate[],
+) {
+  const fields = decision.nextAction.fields ?? [];
+
+  if (fields.length === 0) {
+    const targetCandidate = resolveCandidate(decision, candidates);
+
+    if (!targetCandidate) {
+      throw new Error("Model selected fill_form without a valid target.");
+    }
+
+    const fallbackValue = decision.nextAction.inputText?.trim();
+
+    if (!fallbackValue) {
+      throw new Error("Model selected fill_form without values.");
+    }
+
+    await fillCandidate(page, targetCandidate, fallbackValue);
+    return [targetCandidate.text];
+  }
+
+  const filledTargets: string[] = [];
+
+  for (const field of fields) {
+    const targetCandidate = findCandidateByReference(field.targetId, candidates);
+
+    if (!targetCandidate) {
+      throw new Error(`Model selected unknown field ${field.targetId}.`);
+    }
+
+    await fillCandidate(page, targetCandidate, field.value);
+    filledTargets.push(targetCandidate.text);
+  }
+
+  return filledTargets;
+}
+
+function stepIntent(decisionKind: Decision["kind"]): "load" | "scan" | "type" | "click" {
+  if (decisionKind === "type") {
+    return "type";
+  }
+
+  if (decisionKind === "scroll" || decisionKind === "wait") {
+    return "scan";
+  }
+
+  return "click";
+}
+
+function scenarioCompleted(scenario: DemoScenarioDefinition, finalPage: PageState) {
+  return scenario.id === "saucedemo"
+    ? /cart/.test(finalPage.url)
+    : scenario.id === "automationexercise"
+      ? /automationexercise\.com\/view_cart/.test(finalPage.url)
+      : scenario.id === "theinternet"
+        ? /the-internet\.herokuapp\.com\/secure/.test(finalPage.url) ||
+          finalPage.visibleTargets.some((target) => /logout/i.test(target))
+        : scenario.id === "expandtesting"
+          ? /practice\.expandtesting\.com\/form-confirmation/.test(finalPage.url)
+          : finalPage.visibleTargets.some((target) => /open new account|accounts overview|log out/i.test(target));
+}
+
+async function captureViewportDataUrl(page: Page) {
+  const buffer = await page.screenshot({
+    fullPage: false,
+    type: "jpeg",
+    quality: 45,
+    scale: "css",
+  });
+
+  return `data:image/jpeg;base64,${buffer.toString("base64")}`;
+}
+
+function normalizeModelDecision(
+  modelDecision: ParsedAgentDecision,
+  targetCandidate: InteractiveCandidate | undefined,
+): Decision {
+  const target = targetCandidate?.text ?? modelDecision.nextAction.targetText ?? undefined;
+  const value =
+    modelDecision.nextAction.kind === "fill_form"
+      ? modelDecision.nextAction.fields?.map((field) => field.value).join(", ") ?? undefined
+      : modelDecision.nextAction.inputText ?? undefined;
+
+  return {
+    kind: modelDecision.nextAction.kind === "fill_form" ? "type" : modelDecision.nextAction.kind,
+    rationale: `${modelDecision.pageAssessment} ${modelDecision.nextAction.rationale}`.trim(),
+    target,
+    value,
+  };
+}
+
+function buildDecisionGuardrailNotes(
+  scenario: DemoScenarioDefinition,
+  pageState: PageState,
+  steps: AgentStepRecord[],
+  decision: ParsedAgentDecision,
+  targetCandidate: InteractiveCandidate | undefined,
+) {
+  const notes: string[] = [];
+  const proposedTarget = (
+    targetCandidate?.text ??
+    decision.nextAction.targetText ??
+    decision.nextAction.targetId ??
+    decision.nextAction.kind
+  ).toLowerCase();
+  const lastStep = steps.at(-1);
+
+  if (decision.nextAction.kind === "stop" && !scenarioCompleted(scenario, pageState)) {
+    notes.push("Do not stop yet. The completion boundary is not visible on the current page.");
+  }
+
+  if (
+    lastStep &&
+    lastStep.observation.page.url === pageState.url &&
+    lastStep.decision.target?.toLowerCase() === proposedTarget &&
+    lastStep.decision.kind === decision.nextAction.kind
+  ) {
+    notes.push(`The previous ${decision.nextAction.kind} on "${proposedTarget}" did not materially change the page. Choose a different action.`);
+  }
+
+  const repeatedAddToCartClicks = steps.filter(
+    (step) =>
+      step.observation.page.url === pageState.url &&
+      step.decision.kind === "click" &&
+      /add to cart/i.test(step.decision.target ?? ""),
+  ).length;
+
+  if (decision.nextAction.kind === "click" && /add to cart/i.test(proposedTarget) && repeatedAddToCartClicks >= 1) {
+    notes.push("Do not repeat Add to cart on the same unchanged page. Either reveal View Product, move toward Cart, or choose another safe action.");
+  }
+
+  return notes;
+}
+
+async function executeModelDecision(
+  page: Page,
+  decision: ParsedAgentDecision,
+  candidates: InteractiveCandidate[],
+) {
+  const targetCandidate = resolveCandidate(decision, candidates);
+
+  if (decision.nextAction.kind === "click") {
+    if (!targetCandidate) {
+      throw new Error("Model selected click without a valid target candidate.");
+    }
+
+    await clickCandidate(page, targetCandidate);
+    return {
+      kind: "click" as const,
+      ok: true,
+      details: decision.nextAction.rationale,
+    };
+  }
+
+  if (decision.nextAction.kind === "fill_form") {
+    const filledTargets = await fillFieldSet(page, decision, candidates);
+
+    return {
+      kind: "type" as const,
+      ok: true,
+      details: `filled ${filledTargets.join(", ")}`,
+    };
+  }
+
+  if (decision.nextAction.kind === "scroll") {
+    await page.mouse.wheel(0, decision.nextAction.scrollDirection === "up" ? -320 : 320).catch(() => undefined);
+    return {
+      kind: "scroll" as const,
+      ok: true,
+      details: decision.nextAction.rationale,
+    };
+  }
+
+  if (decision.nextAction.kind === "wait") {
+    return {
+      kind: "wait" as const,
+      ok: true,
+      details: decision.nextAction.rationale,
+    };
+  }
+
+  if (decision.nextAction.kind === "retry") {
+    await page.reload({ waitUntil: "domcontentloaded", timeout: 15_000 });
+    return {
+      kind: "retry" as const,
+      ok: true,
+      details: decision.nextAction.rationale,
+    };
+  }
+
+  if (decision.nextAction.kind === "stop") {
+    return {
+      kind: "stop" as const,
+      ok: true,
+      details: decision.nextAction.rationale,
+    };
+  }
+
+  return {
+    kind: "escalate" as const,
+    ok: false,
+    details: decision.nextAction.rationale,
+  };
 }
 
 function buildEmotion(
@@ -494,46 +1314,9 @@ async function appendStep(
   return pageState;
 }
 
-async function maybeScan(
+async function runModelDrivenFlow(
   page: Page,
-  input: AgentRunInput,
-  startedAt: string,
-  agentId: string,
-  steps: AgentStepRecord[],
-  state: { frustration: number; confidence: number },
-  callbacks: LiveSwarmCallbacks,
-  note: string,
-) {
-  if (input.persona.archetype !== "Novice" || steps.length >= input.config.maxSteps) {
-    return;
-  }
-
-  await page.mouse.wheel(0, 180).catch(() => undefined);
-  await sleep(paceMs(input.persona, "scan"));
-
-  await appendStep(
-    page,
-    input,
-    startedAt,
-    agentId,
-    steps,
-    state,
-    {
-      kind: "scroll",
-      rationale: "novice persona spends extra time scanning the hierarchy",
-    },
-    {
-      kind: "scroll",
-      ok: true,
-      details: note,
-    },
-    note,
-    callbacks,
-  );
-}
-
-async function runSaucedemoFlow(
-  page: Page,
+  scenario: DemoScenarioDefinition,
   input: AgentRunInput,
   startedAt: string,
   agentId: string,
@@ -543,708 +1326,99 @@ async function runSaucedemoFlow(
 ) {
   await gotoWithRetry(page, input.config.targetUrl, { waitUntil: "domcontentloaded", timeout: 20_000 });
   await sleep(paceMs(input.persona, "load"));
+  const playbook = buildScenarioPlaybook(scenario, input.persona, input.config.seed ?? agentId);
 
-  await appendStep(
-    page,
-    input,
-    startedAt,
-    agentId,
-    steps,
-    state,
-    {
-      kind: "wait",
-      rationale: "the agent waits for the login surface to render",
-    },
-    {
-      kind: "wait",
-      ok: true,
-      details: "loaded the SauceDemo credential gate",
-    },
-    "entered the login surface",
-    callbacks,
-  );
+  while (steps.length < input.config.maxSteps) {
+    await dismissInterruptingSurface(page);
+    await assertUsableSurface(page);
+    const pageState = await snapshotPage(page, input.config.targetUrl);
+    const candidates = await extractInteractiveCandidates(page);
+    const screenshotDataUrl = await captureViewportDataUrl(page);
+    const decisionContext = {
+      scenarioName: scenario.name,
+      goal: input.config.goal,
+      persona: input.persona,
+      playbook,
+      step: steps.length,
+      maxSteps: input.config.maxSteps,
+      recentHistory: steps.slice(-4).map((step) => ({
+        action: `${step.decision.kind} -> ${step.action.kind}`,
+        detail: step.action.details,
+        frustration: step.frustration,
+          confidence: step.confidence,
+        })),
+      validatorNotes: [],
+      observation: {
+        screenshotDataUrl,
+        url: pageState.url,
+        title: pageState.title,
+        loadState: pageState.loadState,
+        visibleTargets: pageState.visibleTargets,
+        errorFlags: pageState.errorFlags,
+        candidates: candidates.map<ObservedCandidate>((candidate) => ({
+          id: candidate.id,
+          text: candidate.text,
+          tagName: candidate.tagName,
+          inputType: candidate.inputType,
+          role: candidate.role,
+          placeholder: candidate.placeholder,
+          ariaLabel: candidate.ariaLabel,
+          href: candidate.href,
+          surfaceLabel: candidate.surfaceLabel,
+          viewportState: candidate.viewportState,
+          disabled: candidate.disabled,
+          selectOptions: candidate.selectOptions,
+          x: Math.round(candidate.x * 10) / 10,
+          y: Math.round(candidate.y * 10) / 10,
+          width: Math.round(candidate.width * 10) / 10,
+          height: Math.round(candidate.height * 10) / 10,
+        })),
+      },
+    } satisfies Parameters<typeof decideNextAction>[0];
 
-  await maybeScan(page, input, startedAt, agentId, steps, state, callbacks, "lingered to read the credential hints");
+    let { decision: modelDecision } = await decideNextAction(decisionContext);
+    let targetCandidate = resolveCandidate(modelDecision, candidates);
+    const guardrailNotes = buildDecisionGuardrailNotes(
+      scenario,
+      pageState,
+      steps,
+      modelDecision,
+      targetCandidate,
+    );
 
-  if (steps.length >= input.config.maxSteps) {
-    return;
+    if (guardrailNotes.length > 0) {
+      ({ decision: modelDecision } = await decideNextAction({
+        ...decisionContext,
+        validatorNotes: guardrailNotes,
+      }));
+      targetCandidate = resolveCandidate(modelDecision, candidates);
+    }
+
+    const decision = normalizeModelDecision(modelDecision, targetCandidate);
+    const action = await executeModelDecision(page, modelDecision, candidates);
+
+    await sleep(paceMs(input.persona, stepIntent(decision.kind)));
+    const nextPageState = await appendStep(
+      page,
+      input,
+      startedAt,
+      agentId,
+      steps,
+      state,
+      decision,
+      action,
+      `${modelDecision.pageAssessment} | ${modelDecision.nextAction.rationale}`,
+      callbacks,
+    );
+
+    if (
+      decision.kind === "stop" ||
+      decision.kind === "escalate" ||
+      scenarioCompleted(scenario, nextPageState)
+    ) {
+      return;
+    }
   }
-
-  await page.getByPlaceholder("Username").fill("standard_user");
-  await sleep(paceMs(input.persona, "type"));
-  await page.getByPlaceholder("Password").fill("secret_sauce");
-  await sleep(paceMs(input.persona, "type"));
-
-  await appendStep(
-    page,
-    input,
-    startedAt,
-    agentId,
-    steps,
-    state,
-    {
-      kind: "type",
-      rationale: "credential entry is required before the agent can reach inventory",
-      target: "login form",
-      value: "standard_user / secret_sauce",
-    },
-    {
-      kind: "type",
-      ok: true,
-      details: "filled the visible username and password controls",
-    },
-    "credentials are populated and ready for submit",
-    callbacks,
-  );
-
-  if (steps.length >= input.config.maxSteps) {
-    return;
-  }
-
-  await clickWithFallback(page, "login", [
-    () => page.getByRole("button", { name: /^login$/i }),
-    () => page.locator("#login-button"),
-  ]);
-  await page.waitForURL(/inventory/, { timeout: 12_000 });
-  await sleep(paceMs(input.persona, "click"));
-
-  await appendStep(
-    page,
-    input,
-    startedAt,
-    agentId,
-    steps,
-    state,
-    {
-      kind: "click",
-      rationale: "inventory is behind the primary login CTA",
-      target: "login",
-    },
-    {
-      kind: "click",
-      ok: true,
-      details: "advanced from login into the inventory grid",
-    },
-    "inventory grid is now visible",
-    callbacks,
-  );
-
-  if (steps.length >= input.config.maxSteps) {
-    return;
-  }
-
-  await clickWithFallback(page, "add to cart", [
-    () => page.getByRole("button", { name: /add to cart/i }),
-    () => page.locator("[data-test^='add-to-cart']"),
-  ]);
-  await sleep(paceMs(input.persona, "click"));
-
-  await appendStep(
-    page,
-    input,
-    startedAt,
-    agentId,
-    steps,
-    state,
-    {
-      kind: "click",
-      rationale: "the agent chooses the first visible add-to-cart CTA",
-      target: "inventory add to cart",
-    },
-    {
-      kind: "click",
-      ok: true,
-      details: "added an inventory item to the cart",
-    },
-    "the primary commerce CTA succeeded",
-    callbacks,
-  );
-
-  if (steps.length >= input.config.maxSteps) {
-    return;
-  }
-
-  await clickWithFallback(page, "shopping cart", [
-    () => page.locator(".shopping_cart_link"),
-    () => page.getByRole("link", { name: /shopping cart/i }),
-  ]);
-  await page.waitForURL(/cart/, { timeout: 12_000 });
-  await sleep(paceMs(input.persona, "click"));
-
-  await appendStep(
-    page,
-    input,
-    startedAt,
-    agentId,
-    steps,
-    state,
-    {
-      kind: "click",
-      rationale: "the agent verifies the cart boundary after add-to-cart",
-      target: "shopping cart",
-    },
-    {
-      kind: "click",
-      ok: true,
-      details: "opened the cart review surface",
-    },
-    "cart review completed",
-    callbacks,
-  );
-}
-
-async function runAutomationExerciseFlow(
-  page: Page,
-  input: AgentRunInput,
-  startedAt: string,
-  agentId: string,
-  steps: AgentStepRecord[],
-  state: { frustration: number; confidence: number },
-  callbacks: LiveSwarmCallbacks,
-) {
-  await gotoWithRetry(page, input.config.targetUrl, { waitUntil: "domcontentloaded", timeout: 20_000 });
-  await sleep(paceMs(input.persona, "load"));
-
-  await appendStep(
-    page,
-    input,
-    startedAt,
-    agentId,
-    steps,
-    state,
-    {
-      kind: "wait",
-      rationale: "the agent waits for the catalog surface to settle before searching",
-    },
-    {
-      kind: "wait",
-      ok: true,
-      details: "loaded the Automation Exercise products catalog",
-    },
-    "catalog and search entry are visible",
-    callbacks,
-  );
-
-  await assertUsableSurface(page);
-  await maybeScan(page, input, startedAt, agentId, steps, state, callbacks, "paused to scan the product grid and search affordances");
-
-  if (steps.length >= input.config.maxSteps) {
-    return;
-  }
-
-  await page.locator("#search_product").fill("Blue Top");
-  await sleep(paceMs(input.persona, "type"));
-  await clickWithFallback(page, "search submit", [
-    () => page.locator("#submit_search"),
-    () => page.getByRole("button", { name: /search/i }),
-  ]);
-  await waitForSurface(page, {
-    label: "filtered Automation Exercise search results",
-    timeout: 15_000,
-    urlPattern: /products\?search=/,
-    locatorBuilders: [
-      () => page.locator("a[href='/product_details/1']"),
-      () => page.getByRole("link", { name: /View Product/i }),
-    ],
-  });
-  await sleep(paceMs(input.persona, "click"));
-
-  await appendStep(
-    page,
-    input,
-    startedAt,
-    agentId,
-    steps,
-    state,
-    {
-      kind: "type",
-      rationale: "the catalog search box is the fastest route to a precise product detail page",
-      target: "search",
-      value: "Blue Top",
-    },
-    {
-      kind: "type",
-      ok: true,
-      details: "searched the public catalog for the Blue Top product",
-    },
-    "filtered results are now visible",
-    callbacks,
-  );
-
-  await assertUsableSurface(page);
-
-  if (steps.length >= input.config.maxSteps) {
-    return;
-  }
-
-  const productLinkCandidates = [
-    () => page.locator("a[href='/product_details/1']"),
-    () => page.getByRole("link", { name: /View Product/i }),
-  ];
-  const productDetailUrl = await resolveFirstHref(page, productLinkCandidates);
-
-  await clickThenConfirmSurface(page, "View Product", productLinkCandidates, {
-    label: "Automation Exercise product detail",
-    timeout: 15_000,
-    urlPattern: /product_details\//,
-    locatorBuilders: [
-      () => page.getByRole("button", { name: /add to cart/i }),
-      () => page.locator("button.cart"),
-    ],
-    fallbackUrl: productDetailUrl,
-  });
-  await sleep(paceMs(input.persona, "click"));
-
-  await appendStep(
-    page,
-    input,
-    startedAt,
-    agentId,
-    steps,
-    state,
-    {
-      kind: "click",
-      rationale: "the agent drills into the first matching product detail page from the filtered catalog",
-      target: "View Product",
-    },
-    {
-      kind: "click",
-      ok: true,
-      details: "opened the Blue Top product detail surface",
-    },
-    "product detail is visible",
-    callbacks,
-  );
-
-  await assertUsableSurface(page);
-
-  if (steps.length >= input.config.maxSteps) {
-    return;
-  }
-
-  await clickWithFallback(page, "Add to cart", [
-    () => page.getByRole("button", { name: /add to cart/i }),
-    () => page.locator("button.cart"),
-  ]);
-  await waitForSurface(page, {
-    label: "Automation Exercise cart intent",
-    timeout: 10_000,
-    urlPattern: /view_cart/,
-    locatorBuilders: [
-      () => page.locator("#cartModal"),
-      () => page.locator("a[href='/view_cart']").filter({ hasText: /View Cart/i }),
-      () => page.getByRole("link", { name: /view cart/i }),
-    ],
-  }).catch(() => undefined);
-  await sleep(paceMs(input.persona, "click"));
-
-  await appendStep(
-    page,
-    input,
-    startedAt,
-    agentId,
-    steps,
-    state,
-    {
-      kind: "click",
-      rationale: "the primary product CTA moves the search result into cart intent",
-      target: "Add to cart",
-    },
-    {
-      kind: "click",
-      ok: true,
-      details: "added the product from the detail page into the cart modal",
-    },
-    "cart intent modal is visible",
-    callbacks,
-  );
-
-  if (steps.length >= input.config.maxSteps) {
-    return;
-  }
-
-  await clickThenConfirmSurface(page, "View Cart", [
-    () => page.locator("a[href='/view_cart']").filter({ hasText: /View Cart/i }),
-    () => page.getByRole("link", { name: /view cart/i }),
-  ], {
-    label: "Automation Exercise cart review",
-    timeout: 15_000,
-    urlPattern: /view_cart/,
-    locatorBuilders: [
-      () => page.getByRole("link", { name: /proceed to checkout/i }),
-      () => page.locator(".cart_info"),
-    ],
-    fallbackUrl: "https://automationexercise.com/view_cart",
-  });
-  await sleep(paceMs(input.persona, "click"));
-
-  await appendStep(
-    page,
-    input,
-    startedAt,
-    agentId,
-    steps,
-    state,
-    {
-      kind: "click",
-      rationale: "the agent verifies the cart boundary after the add-to-cart modal appears",
-      target: "View Cart",
-    },
-    {
-      kind: "click",
-      ok: true,
-      details: "opened the cart review surface",
-    },
-    "cart review is visible",
-    callbacks,
-  );
-}
-
-async function runTheInternetFlow(
-  page: Page,
-  input: AgentRunInput,
-  startedAt: string,
-  agentId: string,
-  steps: AgentStepRecord[],
-  state: { frustration: number; confidence: number },
-  callbacks: LiveSwarmCallbacks,
-) {
-  await gotoWithRetry(page, input.config.targetUrl, { waitUntil: "domcontentloaded", timeout: 20_000 });
-  await sleep(paceMs(input.persona, "load"));
-
-  await appendStep(
-    page,
-    input,
-    startedAt,
-    agentId,
-    steps,
-    state,
-    {
-      kind: "wait",
-      rationale: "the agent waits for the module directory to settle before selecting the auth surface",
-    },
-    {
-      kind: "wait",
-      ok: true,
-      details: "loaded The Internet directory of test modules",
-    },
-    "module directory is visible",
-    callbacks,
-  );
-
-  await assertUsableSurface(page);
-  await maybeScan(page, input, startedAt, agentId, steps, state, callbacks, "paused to scan the module list before choosing auth");
-
-  if (steps.length >= input.config.maxSteps) {
-    return;
-  }
-
-  await clickWithFallback(page, "Form Authentication", [
-    () => page.getByRole("link", { name: /form authentication/i }),
-    () => page.locator("a[href='/login']"),
-  ]);
-  await page.waitForURL(/the-internet\.herokuapp\.com\/login/, { timeout: 15_000 });
-  await sleep(paceMs(input.persona, "click"));
-
-  await appendStep(
-    page,
-    input,
-    startedAt,
-    agentId,
-    steps,
-    state,
-    {
-      kind: "click",
-      rationale: "the Form Authentication module is the cleanest path to a visible success state",
-      target: "Form Authentication",
-    },
-    {
-      kind: "click",
-      ok: true,
-      details: "opened the Form Authentication module",
-    },
-    "auth form is visible",
-    callbacks,
-  );
-
-  await assertUsableSurface(page);
-
-  if (steps.length >= input.config.maxSteps) {
-    return;
-  }
-
-  await page.getByLabel("Username").fill("tomsmith");
-  await sleep(paceMs(input.persona, "type"));
-  await page.getByLabel("Password").fill("SuperSecretPassword!");
-  await sleep(paceMs(input.persona, "type"));
-
-  await appendStep(
-    page,
-    input,
-    startedAt,
-    agentId,
-    steps,
-    state,
-    {
-      kind: "type",
-      rationale: "the secure area is behind a visible username and password form",
-      target: "login form",
-      value: "tomsmith / SuperSecretPassword!",
-    },
-    {
-      kind: "type",
-      ok: true,
-      details: "filled the published demo credentials",
-    },
-    "credentials are ready for submit",
-    callbacks,
-  );
-
-  if (steps.length >= input.config.maxSteps) {
-    return;
-  }
-
-  await clickWithFallback(page, "Login", [
-    () => page.getByRole("button", { name: /^login$/i }),
-    () => page.locator("button[type='submit']"),
-  ]);
-  await page.waitForURL(/the-internet\.herokuapp\.com\/secure/, { timeout: 15_000 });
-  await sleep(paceMs(input.persona, "click"));
-
-  await appendStep(
-    page,
-    input,
-    startedAt,
-    agentId,
-    steps,
-    state,
-    {
-      kind: "click",
-      rationale: "the login CTA is the final gate into the secure area",
-      target: "Login",
-    },
-    {
-      kind: "click",
-      ok: true,
-      details: "landed on the secure area and observed the success flash",
-    },
-    "secure area is visible",
-    callbacks,
-  );
-}
-
-async function runExpandTestingFlow(
-  page: Page,
-  input: AgentRunInput,
-  startedAt: string,
-  agentId: string,
-  steps: AgentStepRecord[],
-  state: { frustration: number; confidence: number },
-  callbacks: LiveSwarmCallbacks,
-) {
-  await gotoWithRetry(page, input.config.targetUrl, { waitUntil: "domcontentloaded", timeout: 20_000 });
-  await sleep(paceMs(input.persona, "load"));
-
-  await appendStep(
-    page,
-    input,
-    startedAt,
-    agentId,
-    steps,
-    state,
-    {
-      kind: "wait",
-      rationale: "the agent waits for the validation form to settle before editing multiple fields",
-    },
-    {
-      kind: "wait",
-      ok: true,
-      details: "loaded the Expand Testing validation form",
-    },
-    "validation form is visible",
-    callbacks,
-  );
-
-  await assertUsableSurface(page);
-  await maybeScan(page, input, startedAt, agentId, steps, state, callbacks, "paused to scan the labels and field order");
-
-  if (steps.length >= input.config.maxSteps) {
-    return;
-  }
-
-  await page.locator("#validationCustom01").fill("Chaos Swarm");
-  await sleep(paceMs(input.persona, "type"));
-  await page.locator("input[name='contactnumber']").fill("012-3456789");
-  await sleep(paceMs(input.persona, "type"));
-  await page.locator("input[name='pickupdate']").fill("2026-04-15");
-  await sleep(paceMs(input.persona, "type"));
-  await page.locator("select[name='payment']").selectOption({ label: "card" });
-  await sleep(paceMs(input.persona, "click"));
-
-  await appendStep(
-    page,
-    input,
-    startedAt,
-    agentId,
-    steps,
-    state,
-    {
-      kind: "type",
-      rationale: "the form requires valid text, phone, date, and payment inputs before submit is meaningful",
-      target: "validation form",
-      value: "name, phone, pickup date, payment",
-    },
-    {
-      kind: "type",
-      ok: true,
-      details: "filled the visible validation form controls with valid values",
-    },
-    "validation inputs are resolved",
-    callbacks,
-  );
-
-  if (steps.length >= input.config.maxSteps) {
-    return;
-  }
-
-  await clickWithFallback(page, "Register", [
-    () => page.getByRole("button", { name: /register/i }),
-    () => page.locator("button[type='submit']"),
-  ]);
-  await page.waitForURL(/practice\.expandtesting\.com\/form-confirmation/, { timeout: 15_000 });
-  await sleep(paceMs(input.persona, "click"));
-
-  await appendStep(
-    page,
-    input,
-    startedAt,
-    agentId,
-    steps,
-    state,
-    {
-      kind: "click",
-      rationale: "the final submit validates whether the form accepts the assembled inputs",
-      target: "Register",
-    },
-    {
-      kind: "click",
-      ok: true,
-      details: "submitted the validation form and reached the confirmation page",
-    },
-    "confirmation page is visible",
-    callbacks,
-  );
-}
-
-async function runParabankFlow(
-  page: Page,
-  input: AgentRunInput,
-  startedAt: string,
-  agentId: string,
-  steps: AgentStepRecord[],
-  state: { frustration: number; confidence: number },
-  callbacks: LiveSwarmCallbacks,
-) {
-  await gotoWithRetry(page, input.config.targetUrl, { waitUntil: "domcontentloaded", timeout: 20_000 });
-  await sleep(paceMs(input.persona, "load"));
-
-  await appendStep(
-    page,
-    input,
-    startedAt,
-    agentId,
-    steps,
-    state,
-    {
-      kind: "wait",
-      rationale: "the agent waits for the finance onboarding form to settle before typing dense profile data",
-    },
-    {
-      kind: "wait",
-      ok: true,
-      details: "loaded the ParaBank registration page",
-    },
-    "registration form is visible",
-    callbacks,
-  );
-
-  await assertUsableSurface(page);
-  await maybeScan(page, input, startedAt, agentId, steps, state, callbacks, "paused to scan the dense onboarding form");
-
-  if (steps.length >= input.config.maxSteps) {
-    return;
-  }
-
-  const suffix = (input.config.seed ?? `${Date.now()}`).replace(/[^a-z0-9]/gi, "").slice(-8).toLowerCase();
-  const username = `chaosswarm${suffix}`;
-  const password = "SuperSecret123!";
-
-  await page.locator("[name='customer.firstName']").fill("Chaos");
-  await page.locator("[name='customer.lastName']").fill("Swarm");
-  await page.locator("[name='customer.address.street']").fill("1 Market St");
-  await page.locator("[name='customer.address.city']").fill("San Francisco");
-  await page.locator("[name='customer.address.state']").fill("CA");
-  await page.locator("[name='customer.address.zipCode']").fill("94105");
-  await page.locator("[name='customer.phoneNumber']").fill("4155550101");
-  await page.locator("[name='customer.ssn']").fill(suffix.padStart(8, "0").slice(0, 8));
-  await page.locator("[name='customer.username']").fill(username);
-  await page.locator("[name='customer.password']").fill(password);
-  await page.locator("[name='repeatedPassword']").fill(password);
-  await sleep(paceMs(input.persona, "type"));
-
-  await appendStep(
-    page,
-    input,
-    startedAt,
-    agentId,
-    steps,
-    state,
-    {
-      kind: "type",
-      rationale: "the onboarding surface requires a fully populated identity and credential set",
-      target: "registration form",
-      value: username,
-    },
-    {
-      kind: "type",
-      ok: true,
-      details: "filled the ParaBank registration inputs with a unique seeded username",
-    },
-    "registration inputs are populated",
-    callbacks,
-  );
-
-  if (steps.length >= input.config.maxSteps) {
-    return;
-  }
-
-  await clickWithFallback(page, "Register", [
-    () => page.locator("input[value='Register']"),
-    () => page.getByRole("button", { name: /register/i }),
-  ]);
-  await page.locator("a[href*='openaccount'], a[href*='overview']").first().waitFor({ timeout: 15_000 });
-  await sleep(paceMs(input.persona, "click"));
-
-  await appendStep(
-    page,
-    input,
-    startedAt,
-    agentId,
-    steps,
-    state,
-    {
-      kind: "click",
-      rationale: "the submit action determines whether the finance onboarding completes cleanly",
-      target: "Register",
-    },
-    {
-      kind: "click",
-      ok: true,
-      details: "created a fresh ParaBank account and reached the account-services dashboard",
-    },
-    "account services are visible",
-    callbacks,
-  );
 }
 
 async function runLiveAgent(
@@ -1287,30 +1461,10 @@ async function runLiveAgent(
   );
 
   try {
-    if (scenario.id === "saucedemo") {
-      await runSaucedemoFlow(page, input, startedAt, agentId, steps, state, callbacks);
-    } else if (scenario.id === "automationexercise") {
-      await runAutomationExerciseFlow(page, input, startedAt, agentId, steps, state, callbacks);
-    } else if (scenario.id === "theinternet") {
-      await runTheInternetFlow(page, input, startedAt, agentId, steps, state, callbacks);
-    } else if (scenario.id === "expandtesting") {
-      await runExpandTestingFlow(page, input, startedAt, agentId, steps, state, callbacks);
-    } else {
-      await runParabankFlow(page, input, startedAt, agentId, steps, state, callbacks);
-    }
+    await runModelDrivenFlow(page, scenario, input, startedAt, agentId, steps, state, callbacks);
 
     finalPage = await snapshotPage(page, input.config.targetUrl);
-    const completed =
-      scenario.id === "saucedemo"
-        ? /cart/.test(finalPage.url)
-        : scenario.id === "automationexercise"
-          ? /automationexercise\.com\/view_cart/.test(finalPage.url)
-          : scenario.id === "theinternet"
-            ? /the-internet\.herokuapp\.com\/secure/.test(finalPage.url) ||
-              finalPage.visibleTargets.some((target) => /logout/i.test(target))
-            : scenario.id === "expandtesting"
-              ? /practice\.expandtesting\.com\/form-confirmation/.test(finalPage.url)
-              : finalPage.visibleTargets.some((target) => /open new account|accounts overview|log out/i.test(target));
+    const completed = scenarioCompleted(scenario, finalPage);
 
     return buildRunningSnapshot(
       input,

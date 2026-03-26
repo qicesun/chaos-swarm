@@ -11,6 +11,7 @@ export const env = {
   storageMode,
   executionMode,
   openAiApiKey: process.env.OPENAI_API_KEY,
+  agentModel: process.env.CHAOS_SWARM_AGENT_MODEL || "gpt-4o-mini",
   browserbaseApiKey: process.env.BROWSERBASE_API_KEY,
   supabaseUrl: process.env.NEXT_PUBLIC_SUPABASE_URL,
   supabaseAnonKey: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,

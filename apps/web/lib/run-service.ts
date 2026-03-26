@@ -360,8 +360,10 @@ function buildSummary(agentRuns: AgentRunResult[]) {
 function buildWarnings() {
   const warnings: string[] = [];
 
-  if (!env.openAiApiKey) {
-    warnings.push("OPENAI_API_KEY is not configured yet, so model-assisted page evaluation is disabled.");
+  if (env.openAiApiKey) {
+    warnings.push(`OpenAI autonomous agent runtime is active via ${env.agentModel}.`);
+  } else {
+    warnings.push("OPENAI_API_KEY is missing, so autonomous agent execution cannot start.");
   }
 
   if (env.executionMode === "simulation") {
