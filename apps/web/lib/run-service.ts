@@ -30,24 +30,158 @@ function selectPersonas(agentCount: number): AgentPersona[] {
   return Array.from({ length: agentCount }, (_, index) => catalog[index % catalog.length]);
 }
 
-function toTimeline(agentRuns: AgentRunResult[]): TimelineEvent[] {
+function titleCase(value: string) {
+  return value
+    .replace(/[-_]+/g, " ")
+    .replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+function describeStepTitle(step: AgentRunResult["steps"][number], stageLabel: string | null) {
+  const target = step.decision.target ?? "";
+
+  if (stageLabel && step.action.ok && (step.decision.kind === "wait" || step.decision.kind === "click")) {
+    return `Reached ${stageLabel}`;
+  }
+
+  if (step.action.kind === "escalate") {
+    return "Aborted after a runtime problem";
+  }
+
+  if (step.decision.kind === "wait") {
+    return "Loaded the next screen";
+  }
+
+  if (step.decision.kind === "scroll") {
+    return "Scanned the page before acting";
+  }
+
+  if (step.decision.kind === "type") {
+    if (/login form/i.test(target)) {
+      return "Filled the login form";
+    }
+
+    if (/registration form/i.test(target)) {
+      return "Filled the registration form";
+    }
+
+    if (/validation form/i.test(target)) {
+      return "Filled the validation form";
+    }
+
+    if (/search/i.test(target)) {
+      return "Entered a search query";
+    }
+
+    return `Entered information into ${target || "the form"}`;
+  }
+
+  if (step.decision.kind === "click") {
+    if (/login/i.test(target)) {
+      return "Submitted the login action";
+    }
+
+    if (/register/i.test(target)) {
+      return "Submitted the registration action";
+    }
+
+    if (/add to cart/i.test(target)) {
+      return "Added the item to cart";
+    }
+
+    if (/view cart|shopping cart|cart review/i.test(target)) {
+      return "Opened the cart view";
+    }
+
+    if (/view product/i.test(target)) {
+      return "Opened the product detail page";
+    }
+
+    if (/form authentication/i.test(target)) {
+      return "Opened the authentication module";
+    }
+
+    if (/search submit/i.test(target)) {
+      return "Submitted the search";
+    }
+
+    return `Clicked ${target || "the next control"}`;
+  }
+
+  if (step.decision.kind === "retry") {
+    return `Retried ${target || "the previous action"}`;
+  }
+
+  return `${titleCase(step.decision.kind)} action`;
+}
+
+function describeStepDetail(step: AgentRunResult["steps"][number]) {
+  return step.action.details || step.observation.summary;
+}
+
+function getStageLabelForStep(step: AgentRunResult["steps"][number], scenario: DemoScenarioDefinition) {
+  const matchedStage = scenario.frames.find((stage) =>
+    stageMatched(
+      {
+        agentId: "timeline",
+        persona: {
+          archetype: "Speedrunner",
+          skillLevel: 1,
+          patience: 1,
+          attentionBias: 1,
+          readingSpeed: 1,
+          rageThreshold: 1,
+        },
+        config: {
+          targetUrl: step.observation.page.url,
+          goal: "",
+          maxSteps: step.step + 1,
+          demoMode: false,
+        },
+        startedAt: step.timestamp,
+        finishedAt: step.timestamp,
+        completed: false,
+        failed: false,
+        finalPage: step.observation.page,
+        summary: step.observation.summary,
+        steps: [step],
+      },
+      scenario,
+      stage,
+    ),
+  );
+
+  return matchedStage?.label ?? null;
+}
+
+function toTimeline(agentRuns: AgentRunResult[], scenario: DemoScenarioDefinition): TimelineEvent[] {
   return agentRuns
-    .flatMap((run) =>
-      run.steps.map((step) => ({
-        id: `${run.agentId}-${step.step}`,
-        agentId: run.agentId,
-        persona: run.persona.archetype,
-        step: step.step,
-        timestamp: step.timestamp,
-        action: `${step.decision.kind} -> ${step.action.kind}`,
-        actionOk: step.action.ok,
-        loadState: step.observation.page.loadState,
-        url: step.observation.page.url,
-        note: step.observation.summary,
-        frustration: round(step.frustration * 100),
-        confidence: round(step.confidence * 100),
-      })),
-    )
+    .flatMap((run) => {
+      return run.steps.map((step) => {
+        const stageLabel = getStageLabelForStep(step, scenario);
+        const title = describeStepTitle(step, stageLabel);
+
+        return {
+          id: `${run.agentId}-${step.step}`,
+          agentId: run.agentId,
+          persona: run.persona.archetype,
+          step: step.step,
+          timestamp: step.timestamp,
+          stageLabel,
+          title,
+          detail: describeStepDetail(step),
+          rationale: step.decision.rationale,
+          action: title,
+          actionCode: `${step.decision.kind} -> ${step.action.kind}`,
+          decisionKind: step.decision.kind,
+          actionOk: step.action.ok,
+          loadState: step.observation.page.loadState,
+          url: step.observation.page.url,
+          note: step.observation.summary,
+          frustration: round(step.frustration * 100),
+          confidence: round(step.confidence * 100),
+        };
+      });
+    })
     .sort((left, right) => left.timestamp.localeCompare(right.timestamp));
 }
 
@@ -235,7 +369,7 @@ function createPlaceholderReport(targetUrl: string, goal: string, agentCount: nu
 }
 
 function refreshDerivedFields(record: RunRecord, scenario: DemoScenarioDefinition) {
-  record.events = toTimeline(record.agentRuns);
+  record.events = toTimeline(record.agentRuns, scenario);
   record.summary = buildSummary(record.agentRuns);
   record.personaSummary = buildPersonaSummary(record.agentRuns);
   record.stageSummary = buildStageSummary(record.agentRuns, scenario);

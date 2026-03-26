@@ -57,12 +57,12 @@ export async function persistRunRecord(record: RunRecord) {
         run_id: record.id,
         agent_id: event.agentId,
         step_index: event.step,
-        action_kind: event.action,
+        action_kind: event.actionCode,
         action_ok: event.actionOk,
-        decision_kind: event.action,
+        decision_kind: event.decisionKind,
         load_state: event.loadState,
         page_url: event.url,
-        note: event.note,
+        note: `${event.title} | ${event.detail}`,
         frustration: event.frustration,
         confidence: event.confidence,
         occurred_at: event.timestamp,
@@ -85,4 +85,3 @@ export async function persistRunRecord(record: RunRecord) {
     };
   }
 }
-

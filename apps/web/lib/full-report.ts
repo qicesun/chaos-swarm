@@ -37,12 +37,15 @@ function formatPercent(value: number) {
 function eventLine(event: RunRecord["events"][number]) {
   return [
     `- [${event.timestamp}] ${event.agentId}`,
-    `${event.action}`,
+    `title=${event.title}`,
+    `detail=${event.detail}`,
+    `why=${event.rationale}`,
+    `stage=${event.stageLabel ?? "unclassified"}`,
     `frustration=${event.frustration}%`,
     `confidence=${event.confidence}%`,
     `load=${event.loadState}`,
     `url=${event.url}`,
-    `note=${event.note}`,
+    `raw=${event.actionCode}`,
   ].join(" | ");
 }
 

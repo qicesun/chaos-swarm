@@ -168,22 +168,39 @@ export function RunMonitor({ initialRun }: RunMonitorProps) {
                 className="grid gap-3 rounded-[1.3rem] border border-[var(--line)] bg-white/60 px-4 py-4 lg:grid-cols-[1.2fr_0.8fr_0.8fr_1.2fr]"
               >
                 <div>
-                  <p className="font-semibold">{event.agentId}</p>
-                  <p className="text-sm text-[var(--muted)]">{event.url}</p>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <p className="font-semibold">{event.agentId}</p>
+                    <span className="rounded-full bg-white/70 px-2 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-[var(--muted)]">
+                      step {event.step}
+                    </span>
+                    {event.stageLabel ? (
+                      <span className="rounded-full bg-[rgba(200,76,38,0.1)] px-2 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-[var(--accent)]">
+                        {event.stageLabel}
+                      </span>
+                    ) : null}
+                  </div>
+                  <p className="mt-2 text-base font-semibold">{event.title}</p>
+                  <p className="mt-1 text-sm leading-7 text-[var(--muted)]">{event.detail}</p>
                 </div>
                 <div>
-                  <p className="text-sm uppercase tracking-[0.18em] text-[var(--muted)]">Action</p>
-                  <p className="text-sm">{event.action}</p>
+                  <p className="text-sm uppercase tracking-[0.18em] text-[var(--muted)]">Why</p>
+                  <p className="text-sm leading-7 text-[var(--muted)]">{event.rationale}</p>
                 </div>
                 <div>
                   <p className="text-sm uppercase tracking-[0.18em] text-[var(--muted)]">Emotion</p>
                   <p className="text-sm">
                     {event.frustration}% frustration / {event.confidence}% confidence
                   </p>
+                  <p className="mt-2 text-xs uppercase tracking-[0.16em] text-[var(--muted)]">
+                    {event.actionOk ? "Step succeeded" : "Step failed"}
+                  </p>
                 </div>
                 <div>
-                  <p className="text-sm uppercase tracking-[0.18em] text-[var(--muted)]">Note</p>
-                  <p className="text-sm leading-7 text-[var(--muted)]">{event.note}</p>
+                  <p className="text-sm uppercase tracking-[0.18em] text-[var(--muted)]">Technical detail</p>
+                  <p className="text-sm leading-7 text-[var(--muted)]">
+                    {event.actionCode} on a {event.loadState} page.
+                  </p>
+                  <p className="mt-2 text-sm leading-7 text-[var(--muted)]">{event.url}</p>
                 </div>
               </div>
             ))

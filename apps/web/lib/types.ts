@@ -8,7 +8,13 @@ export interface TimelineEvent {
   persona: PersonaArchetype;
   step: number;
   timestamp: string;
+  stageLabel: string | null;
+  title: string;
+  detail: string;
+  rationale: string;
   action: string;
+  actionCode: string;
+  decisionKind: string;
   actionOk: boolean;
   loadState: string;
   url: string;
