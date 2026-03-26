@@ -41,9 +41,43 @@ export default async function ReportPage({ params }: ReportPageProps) {
   return (
     <main className="mx-auto flex min-h-screen w-full max-w-7xl flex-col px-6 py-8 lg:px-10">
       <section className="panel-strong rounded-[2rem] px-8 py-9">
-        <p className="text-sm uppercase tracking-[0.3em] text-[var(--muted)]">Report</p>
-        <h1 className="mt-3 text-4xl font-semibold tracking-[-0.04em]">{report.title}</h1>
-        <p className="mt-4 max-w-4xl text-lg leading-8 text-[var(--muted)]">{report.summary}</p>
+        <div className="flex flex-wrap items-start justify-between gap-6">
+          <div className="max-w-4xl">
+            <p className="text-sm uppercase tracking-[0.3em] text-[var(--muted)]">Report</p>
+            <h1 className="mt-3 text-4xl font-semibold tracking-[-0.04em]">{report.title}</h1>
+            <p className="mt-4 text-lg leading-8 text-[var(--muted)]">{report.summary}</p>
+          </div>
+          <div className="flex flex-wrap gap-3">
+            <a
+              href={`/api/reports/${record.id}/full?format=markdown`}
+              className="rounded-full bg-[var(--accent)] px-5 py-3 text-sm font-semibold text-white"
+            >
+              Download full markdown
+            </a>
+            <a
+              href={`/api/reports/${record.id}/full?format=json`}
+              className="rounded-full border border-[var(--line)] px-5 py-3 text-sm font-semibold"
+            >
+              Download full JSON
+            </a>
+            <Link
+              href={`/runs/${record.id}`}
+              className="rounded-full border border-[var(--line)] px-5 py-3 text-sm font-semibold"
+            >
+              Back to run
+            </Link>
+          </div>
+        </div>
+      </section>
+
+      <section className="mt-8 panel rounded-[2rem] p-7">
+        <p className="text-sm uppercase tracking-[0.25em] text-[var(--muted)]">Portable analysis pack</p>
+        <h2 className="mt-2 text-3xl font-semibold tracking-tight">Hand off the whole run, not just the dashboard</h2>
+        <p className="mt-4 max-w-4xl text-sm leading-7 text-[var(--muted)]">
+          The full markdown export contains runtime warnings, stage and persona summaries, the full event timeline,
+          and each agent&apos;s step log. Paste that document back into Codex to continue diagnosis without losing
+          execution context.
+        </p>
       </section>
 
       <section className="mt-8 grid gap-5 lg:grid-cols-4">
