@@ -10,12 +10,15 @@
     "build": "pnpm -r build",
     "lint": "pnpm --filter @chaos-swarm/web lint && pnpm --filter @chaos-swarm/agent-core typecheck && pnpm --filter @chaos-swarm/reporting typecheck",
     "typecheck": "pnpm --filter @chaos-swarm/web exec tsc --noEmit && pnpm --filter @chaos-swarm/agent-core typecheck && pnpm --filter @chaos-swarm/reporting typecheck",
-    "keys:import": "node ./scripts/import-keys.mjs"
+    "keys:import": "node ./scripts/import-keys.mjs",
+    "db:apply-schema": "node ./scripts/apply-supabase-schema.mjs"
   },
   "devDependencies": {
     "@trigger.dev/build": "4.4.3",
+    "pg": "^8.16.3",
     "trigger.dev": "4.4.3",
     "typescript": "^5.9.3",
+    "vercel": "50.37.0",
     "zod": "4.3.6"
   },
   "dependencies": {

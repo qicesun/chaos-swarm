@@ -100,6 +100,7 @@ export function renderPortableRunReportJson(record: RunRecord) {
 export function renderPortableRunReportMarkdown(record: RunRecord) {
   const portable = buildPortableRunReport(record);
   const coreMarkdown = renderMarkdown(record.report);
+  const readable = record.report.readable;
 
   const lines = [
     "# Chaos Swarm Full Report",
@@ -126,6 +127,39 @@ export function renderPortableRunReportMarkdown(record: RunRecord) {
     `- Peak Frustration: ${portable.run.summary.peakFrustration}%`,
     `- Visual Purity: ${portable.report.executionQuality.visualPurity}%`,
     `- DOM Assist Rate: ${portable.report.executionQuality.domAssistRate}%`,
+    "",
+    "## Reader Summary",
+    "",
+    "### Overview",
+    `- EN: ${readable.overview.en}`,
+    `- ZH: ${readable.overview.zh}`,
+    "",
+    "### Metric Explanations",
+    ...(readable.metrics.length > 0
+      ? readable.metrics.flatMap((metric) => [
+          `- ${metric.title.en}`,
+          `  - EN: ${metric.body.en}`,
+          `  - ZH: ${metric.body.zh}`,
+        ])
+      : ["- No reader metric explanations available."]),
+    "",
+    "### Key Findings",
+    ...(readable.findings.length > 0
+      ? readable.findings.flatMap((finding) => [
+          `- ${finding.title.en}`,
+          `  - EN: ${finding.body.en}`,
+          `  - ZH: ${finding.body.zh}`,
+        ])
+      : ["- No reader findings available."]),
+    "",
+    "### Representative Agent Stories",
+    ...(readable.agentStories.length > 0
+      ? readable.agentStories.flatMap((story) => [
+          `- ${story.agentId} (${story.persona}, ${story.status})`,
+          `  - EN: ${story.summary.en}`,
+          `  - ZH: ${story.summary.zh}`,
+        ])
+      : ["- No agent stories available."]),
     "",
     "## Runtime Warnings",
     ...(portable.run.warnings.length > 0 ? portable.run.warnings.map((warning) => `- ${warning}`) : ["- None"]),

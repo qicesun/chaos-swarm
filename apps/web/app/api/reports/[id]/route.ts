@@ -7,7 +7,7 @@ interface ReportRouteProps {
 
 export async function GET(_: Request, { params }: ReportRouteProps) {
   const { id } = await params;
-  const record = getRunRecord(id);
+  const record = await getRunRecord(id);
 
   if (!record) {
     return NextResponse.json({ error: "Report not found." }, { status: 404 });

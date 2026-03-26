@@ -1,6 +1,8 @@
+﻿import { cookies } from "next/headers";
 import { notFound } from "next/navigation";
 import Link from "next/link";
 import type { ReactNode } from "react";
+import type { LocalizedReportCopy, AgentStory, ReportDocument } from "@chaos-swarm/reporting";
 import { T } from "@/components/locale-provider";
 import { getRunRecord } from "@/lib/run-service";
 
@@ -8,9 +10,83 @@ interface ReportPageProps {
   params: Promise<{ id: string }>;
 }
 
+type Locale = "en" | "zh";
+
+function readLocaleFromCookieStore(store: Awaited<ReturnType<typeof cookies>>): Locale {
+  const cookieValue = store.get("chaos-swarm-locale")?.value;
+  return cookieValue === "zh" ? "zh" : "en";
+}
+
+function pick(locale: Locale, copy: LocalizedReportCopy) {
+  return locale === "zh" ? copy.zh : copy.en;
+}
+
+function completionLabel(report: ReportDocument) {
+  const completedStage = report.funnel.find((stage) => stage.name === "Completed");
+  if (!completedStage) {
+    return "n/a";
+  }
+
+  return `${completedStage.completed}/${completedStage.total}`;
+}
+
+function validityCopy(locale: Locale, report: ReportDocument) {
+  const hasOperationalNoise = report.failureClusters.some(
+    (cluster) =>
+      cluster.signature.startsWith("runner_") ||
+      cluster.signature === "environment_blocked" ||
+      cluster.signature === "strict_visual_execution_limit",
+  );
+
+  if (locale === "zh") {
+    return hasOperationalNoise
+      ? "这次结果混入了一部分运行时或环境噪音，建议先看执行有效性，再解读 UX 结论。"
+      : "这次结果主要反映产品体验本身，更适合作为 UX 证据来阅读。";
+  }
+
+  return hasOperationalNoise
+    ? "Part of this result was shaped by runtime or environment noise, so read execution validity before treating it as pure UX evidence."
+    : "This result mostly reflects product behavior rather than runtime noise, so it is safer to read as UX evidence.";
+}
+
+function metricGuide(locale: Locale) {
+  if (locale === "zh") {
+    return [
+      {
+        title: "EFI",
+        body: "体验阻力指数。越高表示这条路径对蜂群越费力，不一定全是失败，也可能是慢、绕、犹豫多。",
+      },
+      {
+        title: "Visual purity",
+        body: "视觉纯度。越高表示 agent 越多是像真人一样靠屏幕和坐标完成动作。",
+      },
+      {
+        title: "DOM assist rate",
+        body: "DOM 兜底率。越高表示运行时越频繁需要结构化恢复，说明这次结果离纯视觉用户行为更远。",
+      },
+    ];
+  }
+
+  return [
+    {
+      title: "EFI",
+      body: "Experience friction index. Higher means the path felt harder, slower, or more fragile to the swarm.",
+    },
+    {
+      title: "Visual purity",
+      body: "Higher means the agents stayed closer to screen-first, human-like interaction instead of runtime recovery.",
+    },
+    {
+      title: "DOM assist rate",
+      body: "Higher means the runtime had to recover more often with structure-aware help, so the run was less purely visual.",
+    },
+  ];
+}
+
+
 export default async function ReportPage({ params }: ReportPageProps) {
   const { id } = await params;
-  const record = getRunRecord(id);
+  const record = await getRunRecord(id);
 
   if (!record) {
     notFound();
@@ -42,7 +118,9 @@ export default async function ReportPage({ params }: ReportPageProps) {
     );
   }
 
+  const locale = readLocaleFromCookieStore(await cookies());
   const report = record.report;
+  const overview = pick(locale, report.readable.overview);
 
   return (
     <main className="mx-auto flex min-h-screen w-full max-w-7xl flex-col px-6 py-8 lg:px-10">
@@ -54,6 +132,13 @@ export default async function ReportPage({ params }: ReportPageProps) {
             </p>
             <h1 className="mt-3 text-4xl font-semibold tracking-[-0.04em]">{report.title}</h1>
             <p className="mt-4 text-lg leading-8 text-[var(--muted)]">{report.summary}</p>
+            <div className="mt-6 rounded-[1.5rem] border border-[rgba(200,76,38,0.18)] bg-[rgba(200,76,38,0.08)] p-5">
+              <p className="text-sm uppercase tracking-[0.18em] text-[var(--muted)]">
+                <T k="report.readerSummary" />
+              </p>
+              <p className="mt-2 text-base leading-8 text-[var(--foreground)]">{overview}</p>
+              <p className="mt-3 text-sm leading-7 text-[var(--muted)]">{validityCopy(locale, report)}</p>
+            </div>
           </div>
           <div className="flex flex-wrap gap-3">
             <a
@@ -78,6 +163,68 @@ export default async function ReportPage({ params }: ReportPageProps) {
         </div>
       </section>
 
+      <section className="mt-8 grid gap-5 lg:grid-cols-4 xl:grid-cols-6">
+        <MetricCard label="EFI" value={String(report.efi.score)} />
+        <MetricCard label={<T k="run.completed" />} value={completionLabel(report)} />
+        <MetricCard label={<T k="report.failureClustersMetric" />} value={String(report.failureClusters.length)} />
+        <MetricCard label={<T k="report.highlights" />} value={String(report.highlightReel.length)} />
+        <MetricCard label={<T k="report.visualPurity" />} value={`${report.executionQuality.visualPurity}%`} />
+        <MetricCard label={<T k="report.domAssistRate" />} value={`${report.executionQuality.domAssistRate}%`} />
+      </section>
+
+      <section className="mt-8 grid gap-6 lg:grid-cols-[1.15fr_0.85fr]">
+        <article className="panel rounded-[2rem] p-7">
+          <p className="text-sm uppercase tracking-[0.25em] text-[var(--muted)]">
+            <T k="report.readerMetrics" />
+          </p>
+          <h2 className="mt-2 text-3xl font-semibold tracking-tight">
+            <T k="report.readerMetricsTitle" />
+          </h2>
+          <div className="mt-5 grid gap-4">
+            {report.readable.metrics.map((insight, index) => (
+              <ReadableCard key={`${pick(locale, insight.title)}-${index}`} title={pick(locale, insight.title)}>
+                {pick(locale, insight.body)}
+              </ReadableCard>
+            ))}
+            {metricGuide(locale).map((item) => (
+              <ReadableCard key={item.title} title={item.title}>
+                {item.body}
+              </ReadableCard>
+            ))}
+          </div>
+        </article>
+
+        <aside className="panel rounded-[2rem] p-7">
+          <p className="text-sm uppercase tracking-[0.25em] text-[var(--muted)]">
+            <T k="report.readerFindings" />
+          </p>
+          <h2 className="mt-2 text-3xl font-semibold tracking-tight">
+            <T k="report.readerFindingsTitle" />
+          </h2>
+          <div className="mt-5 space-y-4">
+            {report.readable.findings.map((insight, index) => (
+              <ReadableCard key={`${pick(locale, insight.title)}-${index}`} title={pick(locale, insight.title)}>
+                {pick(locale, insight.body)}
+              </ReadableCard>
+            ))}
+          </div>
+        </aside>
+      </section>
+
+      <section className="mt-8 panel rounded-[2rem] p-7">
+        <p className="text-sm uppercase tracking-[0.25em] text-[var(--muted)]">
+          <T k="report.agentStories" />
+        </p>
+        <h2 className="mt-2 text-3xl font-semibold tracking-tight">
+          <T k="report.agentStoriesTitle" />
+        </h2>
+        <div className="mt-5 grid gap-4 lg:grid-cols-2">
+          {report.readable.agentStories.map((story, index) => (
+            <AgentStoryCard key={`${story.agentId}-${index}`} locale={locale} story={story} />
+          ))}
+        </div>
+      </section>
+
       <section className="mt-8 panel rounded-[2rem] p-7">
         <p className="text-sm uppercase tracking-[0.25em] text-[var(--muted)]">
           <T k="report.portablePack" />
@@ -88,15 +235,6 @@ export default async function ReportPage({ params }: ReportPageProps) {
         <p className="mt-4 max-w-4xl text-sm leading-7 text-[var(--muted)]">
           <T k="report.portablePackBody" />
         </p>
-      </section>
-
-      <section className="mt-8 grid gap-5 lg:grid-cols-3 xl:grid-cols-6">
-        <MetricCard label="EFI" value={String(report.efi.score)} />
-        <MetricCard label={<T k="report.failureClustersMetric" />} value={String(report.failureClusters.length)} />
-        <MetricCard label={<T k="report.highlights" />} value={String(report.highlightReel.length)} />
-        <MetricCard label={<T k="report.heatPoints" />} value={String(report.heatmap.length)} />
-        <MetricCard label={<T k="report.visualPurity" />} value={`${report.executionQuality.visualPurity}%`} />
-        <MetricCard label={<T k="report.domAssistRate" />} value={`${report.executionQuality.domAssistRate}%`} />
       </section>
 
       <section className="mt-8 grid gap-6 lg:grid-cols-[1fr_0.95fr]">
@@ -113,7 +251,10 @@ export default async function ReportPage({ params }: ReportPageProps) {
                 <div className="flex items-center justify-between gap-4">
                   <span className="text-sm font-semibold uppercase tracking-[0.18em]">{component.name}</span>
                   <span className="font-mono text-sm text-[var(--muted)]">
-                    <T k="report.contribution" values={{ score: component.score, contribution: component.contribution }} />
+                    <T
+                      k="report.contribution"
+                      values={{ score: component.score, contribution: component.contribution }}
+                    />
                   </span>
                 </div>
                 <div className="mt-2 h-3 overflow-hidden rounded-full bg-[rgba(23,20,18,0.08)]">
@@ -152,40 +293,40 @@ export default async function ReportPage({ params }: ReportPageProps) {
         </aside>
       </section>
 
-      <section className="mt-8 panel rounded-[2rem] p-7">
-        <p className="text-sm uppercase tracking-[0.25em] text-[var(--muted)]">
-          <T k="report.executionPurity" />
-        </p>
-        <h2 className="mt-2 text-3xl font-semibold tracking-tight">
-          <T k="report.executionPurityTitle" />
-        </h2>
-        <div className="mt-6 grid gap-4 lg:grid-cols-2">
-          <div className="rounded-[1.5rem] border border-[var(--line)] bg-white/60 p-5">
-            <div className="flex items-center justify-between gap-4">
-              <span className="text-sm uppercase tracking-[0.18em] text-[var(--muted)]">
-                <T k="report.strictVisualMode" />
-              </span>
-              <span className="font-semibold">
-                {report.executionQuality.strictVisualMode ? "ON" : "OFF"}
-              </span>
-            </div>
-            <div className="mt-4 space-y-4">
-              <MetricRow label={<T k="report.visualPurity" />} value={`${report.executionQuality.visualPurity}%`} />
-              <MetricRow label={<T k="report.domAssistRate" />} value={`${report.executionQuality.domAssistRate}%`} />
-            </div>
+      <section className="mt-8 grid gap-6 lg:grid-cols-[1fr_1fr]">
+        <article className="panel rounded-[2rem] p-7">
+          <p className="text-sm uppercase tracking-[0.25em] text-[var(--muted)]">
+            <T k="report.executionPurity" />
+          </p>
+          <h2 className="mt-2 text-3xl font-semibold tracking-tight">
+            <T k="report.executionPurityTitle" />
+          </h2>
+          <div className="mt-6 grid gap-4">
+            <MetricRow
+              label={<T k="report.strictVisualMode" />}
+              value={report.executionQuality.strictVisualMode ? "ON" : "OFF"}
+            />
+            <MetricRow label={<T k="report.visualPurity" />} value={`${report.executionQuality.visualPurity}%`} />
+            <MetricRow label={<T k="report.domAssistRate" />} value={`${report.executionQuality.domAssistRate}%`} />
+            <MetricRow
+              label={<T k="report.totalInteractionActions" />}
+              value={String(report.executionQuality.totalInteractionActions)}
+            />
+            <MetricRow
+              label={<T k="report.visualOnlyActions" />}
+              value={String(report.executionQuality.visualOnlyActions)}
+            />
+            <MetricRow
+              label={<T k="report.domAssistedActions" />}
+              value={String(report.executionQuality.domAssistedActions)}
+            />
+            <MetricRow
+              label={<T k="report.domOnlyActions" />}
+              value={String(report.executionQuality.domOnlyActions)}
+            />
           </div>
-          <div className="rounded-[1.5rem] border border-[var(--line)] bg-white/60 p-5">
-            <div className="space-y-3">
-              <MetricRow label={<T k="report.totalInteractionActions" />} value={String(report.executionQuality.totalInteractionActions)} />
-              <MetricRow label={<T k="report.visualOnlyActions" />} value={String(report.executionQuality.visualOnlyActions)} />
-              <MetricRow label={<T k="report.domAssistedActions" />} value={String(report.executionQuality.domAssistedActions)} />
-              <MetricRow label={<T k="report.domOnlyActions" />} value={String(report.executionQuality.domOnlyActions)} />
-            </div>
-          </div>
-        </div>
-      </section>
+        </article>
 
-      <section className="mt-8 grid gap-6 lg:grid-cols-[0.95fr_1.05fr]">
         <article className="panel rounded-[2rem] p-7">
           <p className="text-sm uppercase tracking-[0.25em] text-[var(--muted)]">
             <T k="report.failureClusters" />
@@ -214,7 +355,9 @@ export default async function ReportPage({ params }: ReportPageProps) {
             )}
           </div>
         </article>
+      </section>
 
+      <section className="mt-8 grid gap-6 lg:grid-cols-[0.95fr_1.05fr]">
         <article className="panel rounded-[2rem] p-7">
           <p className="text-sm uppercase tracking-[0.25em] text-[var(--muted)]">
             <T k="report.frictionHeat" />
@@ -242,23 +385,23 @@ export default async function ReportPage({ params }: ReportPageProps) {
             </p>
           </div>
         </article>
-      </section>
 
-      <section className="mt-8 panel rounded-[2rem] p-7">
-        <p className="text-sm uppercase tracking-[0.25em] text-[var(--muted)]">
-          <T k="report.narrative" />
-        </p>
-        <h2 className="mt-2 text-3xl font-semibold tracking-tight">
-          <T k="report.narrativeTitle" />
-        </h2>
-        <div className="mt-5 grid gap-4 lg:grid-cols-2">
-          {report.sections.map((section) => (
-            <div key={section.heading} className="rounded-[1.5rem] border border-[var(--line)] bg-white/60 p-5">
-              <h3 className="text-lg font-semibold">{section.heading}</h3>
-              <p className="mt-3 whitespace-pre-line text-sm leading-7 text-[var(--muted)]">{section.body}</p>
-            </div>
-          ))}
-        </div>
+        <article className="panel rounded-[2rem] p-7">
+          <p className="text-sm uppercase tracking-[0.25em] text-[var(--muted)]">
+            <T k="report.narrative" />
+          </p>
+          <h2 className="mt-2 text-3xl font-semibold tracking-tight">
+            <T k="report.narrativeTitle" />
+          </h2>
+          <div className="mt-5 grid gap-4">
+            {report.sections.map((section) => (
+              <div key={section.heading} className="rounded-[1.5rem] border border-[var(--line)] bg-white/60 p-5">
+                <h3 className="text-lg font-semibold">{section.heading}</h3>
+                <p className="mt-3 whitespace-pre-line text-sm leading-7 text-[var(--muted)]">{section.body}</p>
+              </div>
+            ))}
+          </div>
+        </article>
       </section>
     </main>
   );
@@ -278,6 +421,46 @@ function MetricRow({ label, value }: { label: ReactNode; value: string }) {
     <div className="flex items-center justify-between gap-4 rounded-[1rem] bg-[rgba(23,20,18,0.04)] px-4 py-3">
       <span className="text-sm text-[var(--muted)]">{label}</span>
       <span className="font-mono text-sm">{value}</span>
+    </div>
+  );
+}
+
+function ReadableCard({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <div className="rounded-[1.5rem] border border-[var(--line)] bg-white/60 p-5">
+      <h3 className="text-lg font-semibold">{title}</h3>
+      <p className="mt-3 text-sm leading-7 text-[var(--muted)]">{children}</p>
+    </div>
+  );
+}
+
+function AgentStoryCard({ locale, story }: { locale: Locale; story: AgentStory }) {
+  const statusLabel =
+    locale === "zh"
+      ? story.status === "completed"
+        ? "完成"
+        : "失败"
+      : story.status === "completed"
+        ? "Completed"
+        : "Failed";
+
+  const badgeTone =
+    story.status === "completed"
+      ? "bg-[rgba(32,109,71,0.1)] text-[var(--success)]"
+      : "bg-[rgba(181,41,23,0.1)] text-[var(--danger)]";
+
+  return (
+    <div className="rounded-[1.5rem] border border-[var(--line)] bg-white/60 p-5">
+      <div className="flex items-center justify-between gap-4">
+        <div>
+          <h3 className="text-lg font-semibold">{story.agentId}</h3>
+          <p className="mt-1 text-sm text-[var(--muted)]">{story.persona}</p>
+        </div>
+        <span className={`rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-[0.16em] ${badgeTone}`}>
+          {statusLabel}
+        </span>
+      </div>
+      <p className="mt-3 text-sm leading-7 text-[var(--muted)]">{pick(locale, story.summary)}</p>
     </div>
   );
 }

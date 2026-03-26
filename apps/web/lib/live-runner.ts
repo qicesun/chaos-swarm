@@ -1,4 +1,5 @@
-import { chromium, type Browser, type Locator, type Page } from "playwright";
+import Browserbase from "@browserbasehq/sdk";
+import { chromium, type Browser, type BrowserContext, type Locator, type Page } from "playwright";
 import type {
   ActionResult,
   ActionExecutionAssist,
@@ -16,6 +17,7 @@ import {
   type ObservedCandidate,
   type ParsedAgentDecision,
 } from "./openai-agent";
+import { canUseBrowserbase, env } from "./env";
 import type { DemoScenarioDefinition } from "./scenarios";
 
 const BLOCKED_SURFACE_PATTERN = /invalid ssl certificate|attention required|cloudflare|robot or human|access denied|verify you are human|automated access/i;
@@ -54,6 +56,13 @@ interface InteractiveCandidate {
   y: number;
   width: number;
   height: number;
+}
+
+interface AgentRuntimeHandle {
+  browser?: Browser;
+  context: BrowserContext;
+  page: Page;
+  close: () => Promise<void>;
 }
 
 function clamp(value: number, min: number, max: number) {
@@ -1582,11 +1591,97 @@ async function runModelDrivenFlow(
   }
 }
 
-async function runLiveAgent(
+function shouldUseBrowserbaseExecution() {
+  return env.executionMode === "hybrid" && canUseBrowserbase();
+}
+
+async function createLocalAgentRuntime(
   browser: Browser,
+  persona: AgentPersona,
+): Promise<AgentRuntimeHandle> {
+  const context = await browser.newContext({
+    viewport: viewportForPersona(persona),
+    locale: "en-US",
+    timezoneId: "America/Los_Angeles",
+  });
+  const page = await context.newPage();
+
+  return {
+    browser,
+    context,
+    page,
+    close: async () => {
+      await context.close().catch(() => undefined);
+    },
+  };
+}
+
+async function createBrowserbaseAgentRuntime(
+  scenario: DemoScenarioDefinition,
+  input: AgentRunInput,
+): Promise<AgentRuntimeHandle> {
+  if (!env.browserbaseApiKey || !env.browserbaseProjectId) {
+    throw new Error("Browserbase credentials are missing.");
+  }
+
+  const client = new Browserbase({
+    apiKey: env.browserbaseApiKey,
+    timeout: 30_000,
+    maxRetries: 2,
+  });
+  const viewport = viewportForPersona(input.persona);
+  const session = await client.sessions.create({
+    projectId: env.browserbaseProjectId,
+    keepAlive: false,
+    timeout: 15 * 60,
+    region: "us-west-2",
+    browserSettings: {
+      recordSession: true,
+      logSession: true,
+      solveCaptchas: true,
+      blockAds: false,
+      os: "linux",
+      viewport,
+    },
+    userMetadata: {
+      runId: input.config.seed ?? input.agentId ?? "unknown-run",
+      agentId: input.agentId ?? "anonymous-agent",
+      scenario: scenario.id,
+      persona: input.persona.archetype,
+    },
+  });
+  const browser = await chromium.connectOverCDP(session.connectUrl);
+  const context =
+    browser.contexts()[0] ??
+    (await browser.newContext({
+      viewport,
+      locale: "en-US",
+      timezoneId: "America/Los_Angeles",
+    }));
+  const page = context.pages()[0] ?? (await context.newPage());
+
+  return {
+    browser,
+    context,
+    page,
+    close: async () => {
+      await context.close().catch(() => undefined);
+      await browser.close().catch(() => undefined);
+      await client.sessions
+        .update(session.id, {
+          projectId: env.browserbaseProjectId,
+          status: "REQUEST_RELEASE",
+        })
+        .catch(() => undefined);
+    },
+  };
+}
+
+async function runLiveAgent(
   scenario: DemoScenarioDefinition,
   input: AgentRunInput,
   callbacks: LiveSwarmCallbacks,
+  sharedBrowser?: Browser,
 ) {
   const agentId = input.agentId ?? buildAgentId(input.persona, 0);
   const startedAt = new Date().toISOString();
@@ -1604,12 +1699,12 @@ async function runLiveAgent(
       1,
     ),
   };
-  const context = await browser.newContext({
-    viewport: viewportForPersona(input.persona),
-    locale: "en-US",
-    timezoneId: "America/Los_Angeles",
-  });
-  const page = await context.newPage();
+  const runtime = shouldUseBrowserbaseExecution()
+    ? await createBrowserbaseAgentRuntime(scenario, input)
+    : sharedBrowser
+      ? await createLocalAgentRuntime(sharedBrowser, input.persona)
+      : await createLocalAgentRuntime(await chromium.launch({ headless: true }), input.persona);
+  const { page } = runtime;
   let finalPage: PageState = {
     url: input.config.targetUrl,
     visibleTargets: [],
@@ -1682,14 +1777,16 @@ async function runLiveAgent(
       true,
     );
   } finally {
-    await context.close().catch(() => undefined);
+    await runtime.close().catch(() => undefined);
   }
 }
 
 export async function runLiveSwarm(options: LiveSwarmOptions) {
-  const browser = await chromium.launch({
-    headless: true,
-  });
+  const localBrowser = shouldUseBrowserbaseExecution()
+    ? undefined
+    : await chromium.launch({
+        headless: true,
+      });
 
   try {
     return await runWithConcurrency(options.personas, 4, async (persona, index) => {
@@ -1705,11 +1802,11 @@ export async function runLiveSwarm(options: LiveSwarmOptions) {
           strictVisualMode: options.strictVisualMode,
         },
       };
-      const result = await runLiveAgent(browser, options.scenario, input, options);
+      const result = await runLiveAgent(options.scenario, input, options, localBrowser);
       await options.onAgentComplete?.(result);
       return result;
     });
   } finally {
-    await browser.close();
+    await localBrowser?.close().catch(() => undefined);
   }
 }

@@ -8,7 +8,7 @@ interface FullReportRouteProps {
 
 export async function GET(request: Request, { params }: FullReportRouteProps) {
   const { id } = await params;
-  const record = getRunRecord(id);
+  const record = await getRunRecord(id);
 
   if (!record) {
     return NextResponse.json({ error: "Report not found." }, { status: 404 });

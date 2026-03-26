@@ -11,6 +11,7 @@ create table if not exists runs (
   storage_mode text not null,
   execution_mode text not null,
   summary jsonb not null default '{}'::jsonb,
+  record_json jsonb not null default '{}'::jsonb,
   created_at timestamptz not null default timezone('utc', now()),
   completed_at timestamptz
 );
@@ -58,3 +59,13 @@ create table if not exists reports (
 create index if not exists agents_run_id_idx on agents(run_id);
 create index if not exists events_run_id_idx on events(run_id);
 create index if not exists reports_run_id_idx on reports(run_id);
+
+alter table runs add column if not exists record_json jsonb not null default '{}'::jsonb;
+
+alter table runs disable row level security;
+alter table agents disable row level security;
+alter table events disable row level security;
+alter table reports disable row level security;
+
+grant usage on schema public to anon, authenticated;
+grant all on table runs, agents, events, reports to anon, authenticated;

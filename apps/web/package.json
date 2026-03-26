@@ -9,6 +9,7 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@browserbasehq/sdk": "^2.9.0",
     "@chaos-swarm/agent-core": "workspace:*",
     "@chaos-swarm/reporting": "workspace:*",
     "@supabase/supabase-js": "^2.100.0",

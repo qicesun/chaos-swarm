@@ -8,7 +8,7 @@ interface RunDetailPageProps {
 
 export default async function RunDetailPage({ params }: RunDetailPageProps) {
   const { id } = await params;
-  const run = getRunRecord(id);
+  const run = await getRunRecord(id);
 
   if (!run) {
     notFound();

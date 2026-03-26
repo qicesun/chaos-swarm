@@ -21,3 +21,21 @@ export function getStore(): Store {
 
   return globalThis.__CHAOS_SWARM_STORE__;
 }
+
+export function upsertRunInStore(record: RunRecord) {
+  const store = getStore();
+  store.runs.set(record.id, record);
+  return record;
+}
+
+export function getRunFromStore(id: string) {
+  return getStore().runs.get(id) ?? null;
+}
+
+export function removeRunFromStore(id: string) {
+  getStore().runs.delete(id);
+}
+
+export function listRunsFromStore() {
+  return Array.from(getStore().runs.values());
+}

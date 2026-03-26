@@ -96,6 +96,21 @@ export function RunMonitor({ initialRun }: RunMonitorProps) {
     {} as Record<string, RunRecord["events"][number]>,
   );
 
+  const founderGuide = [
+    {
+      title: "1. Start with the top metrics / 先看顶部指标",
+      body: "They show scale, completion, and whether the run is getting stuck. / 这四个数字先告诉你规模、完成度，以及这次运行有没有明显卡住。",
+    },
+    {
+      title: "2. Read each agent as one storyline / 每个 agent 都是一条故事线",
+      body: "The card shows what the agent tried, why it chose that move, and whether it finished. / 卡片里会显示它做了什么、为什么这么做，以及最后有没有完成。",
+    },
+    {
+      title: "3. Open the timeline only when you need detail / 只有需要细节时再看时间线",
+      body: "If something looks off, use the timeline to inspect the exact step, page state, and action mode. / 如果哪里看起来不对，再打开时间线看具体步骤、页面状态和动作方式。",
+    },
+  ];
+
   return (
     <main className="mx-auto flex min-h-screen w-full max-w-7xl flex-col px-6 py-8 lg:px-10">
       <section className="panel-strong rounded-[2rem] px-8 py-8">
@@ -136,6 +151,27 @@ export function RunMonitor({ initialRun }: RunMonitorProps) {
         <MetricCard label={t("run.completed")} value={`${run.summary.completed}/${run.agentCount}`} />
         <MetricCard label={t("run.averageSteps")} value={String(run.summary.averageSteps)} />
         <MetricCard label={t("run.peakFrustration")} value={`${run.summary.peakFrustration}%`} tone="danger" />
+      </section>
+
+      <section className="mt-8 panel rounded-[2rem] p-7">
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <div>
+            <p className="text-sm uppercase tracking-[0.25em] text-[var(--muted)]">Plain-language guide / 直白说明</p>
+            <h2 className="mt-2 text-3xl font-semibold tracking-tight">How to read this run / 这次运行怎么看</h2>
+          </div>
+          <p className="max-w-xl text-sm leading-7 text-[var(--muted)]">
+            A founder-friendly summary first, then the technical detail if you want it. / 先看给负责人看的简版，
+            需要细节时再往下看技术信息。
+          </p>
+        </div>
+        <div className="mt-6 grid gap-4 lg:grid-cols-3">
+          {founderGuide.map((item) => (
+            <article key={item.title} className="rounded-[1.25rem] border border-[var(--line)] bg-white/60 p-4">
+              <p className="text-sm font-semibold tracking-tight">{item.title}</p>
+              <p className="mt-2 text-sm leading-7 text-[var(--muted)]">{item.body}</p>
+            </article>
+          ))}
+        </div>
       </section>
 
       <section className="mt-8 panel rounded-[2rem] p-7">
@@ -194,7 +230,7 @@ export function RunMonitor({ initialRun }: RunMonitorProps) {
                             </span>
                           ) : null}
                           <span className="rounded-full bg-white/70 px-2 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-[var(--muted)]">
-                            step {latestEvent.step}
+                            Step {latestEvent.step}
                           </span>
                         </div>
                         <p className="mt-3 text-base font-semibold">{latestEvent.title}</p>
@@ -203,16 +239,21 @@ export function RunMonitor({ initialRun }: RunMonitorProps) {
                         <p className="mt-1 text-sm leading-7 text-[var(--muted)]">{latestEvent.rationale}</p>
                         <div className="mt-4 grid gap-3 sm:grid-cols-2">
                           <div className="rounded-[1rem] bg-[rgba(23,20,18,0.04)] px-3 py-3">
-                            <p className="text-[11px] uppercase tracking-[0.14em] text-[var(--muted)]">{t("run.emotion")}</p>
+                            <p className="text-[11px] uppercase tracking-[0.14em] text-[var(--muted)]">Signal / 信号</p>
                             <p className="mt-1 text-sm">
-                              {latestEvent.frustration}% frustration / {latestEvent.confidence}% confidence
+                              Frustration / 挫折 {latestEvent.frustration}% · Confidence / 信心 {latestEvent.confidence}%
+                            </p>
+                            <p className="mt-2 text-xs leading-6 text-[var(--muted)]">
+                              A quick health check, not a diagnosis. / 这是快速状态信号，不是诊断结果。
                             </p>
                           </div>
                           <div className="rounded-[1rem] bg-[rgba(23,20,18,0.04)] px-3 py-3">
-                            <p className="text-[11px] uppercase tracking-[0.14em] text-[var(--muted)]">{t("run.technicalState")}</p>
+                            <p className="text-[11px] uppercase tracking-[0.14em] text-[var(--muted)]">
+                              System state / 系统状态
+                            </p>
                             <p className="mt-1 text-sm text-[var(--muted)]">
-                              {latestEvent.actionCode} on a {latestEvent.loadState} page ·{" "}
-                              {formatExecutionAssistMode(latestEvent.executionAssistMode, locale)}
+                              Action / 动作 {latestEvent.actionCode} · Page state / 页面状态 {latestEvent.loadState} ·
+                              Assist mode / 辅助方式 {formatExecutionAssistMode(latestEvent.executionAssistMode, locale)}
                             </p>
                           </div>
                         </div>
@@ -400,7 +441,7 @@ export function RunMonitor({ initialRun }: RunMonitorProps) {
                   <div className="flex flex-wrap items-center gap-2">
                     <p className="font-semibold">{event.agentId}</p>
                     <span className="rounded-full bg-white/70 px-2 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-[var(--muted)]">
-                      step {event.step}
+                      Step {event.step}
                     </span>
                     {event.stageLabel ? (
                       <span className="rounded-full bg-[rgba(200,76,38,0.1)] px-2 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-[var(--accent)]">
@@ -412,22 +453,26 @@ export function RunMonitor({ initialRun }: RunMonitorProps) {
                   <p className="mt-1 text-sm leading-7 text-[var(--muted)]">{event.detail}</p>
                 </div>
                 <div>
-                  <p className="text-sm uppercase tracking-[0.18em] text-[var(--muted)]">{t("run.why")}</p>
+                  <p className="text-sm uppercase tracking-[0.18em] text-[var(--muted)]">Why / 原因</p>
                   <p className="text-sm leading-7 text-[var(--muted)]">{event.rationale}</p>
                 </div>
                 <div>
-                  <p className="text-sm uppercase tracking-[0.18em] text-[var(--muted)]">{t("run.emotion")}</p>
+                  <p className="text-sm uppercase tracking-[0.18em] text-[var(--muted)]">Signal / 信号</p>
                   <p className="text-sm">
-                    {event.frustration}% frustration / {event.confidence}% confidence
+                    Frustration / 挫折 {event.frustration}% · Confidence / 信心 {event.confidence}%
+                  </p>
+                  <p className="mt-2 text-xs leading-6 text-[var(--muted)]">
+                    This is a rough signal for progress, stress, and certainty. / 这只是进展、压力和确定性的粗略信号。
                   </p>
                   <p className="mt-2 text-xs uppercase tracking-[0.16em] text-[var(--muted)]">
                     {event.actionOk ? t("run.stepSucceeded") : t("run.stepFailed")}
                   </p>
                 </div>
                 <div>
-                  <p className="text-sm uppercase tracking-[0.18em] text-[var(--muted)]">{t("run.technicalDetail")}</p>
+                  <p className="text-sm uppercase tracking-[0.18em] text-[var(--muted)]">System state / 系统状态</p>
                   <p className="text-sm leading-7 text-[var(--muted)]">
-                    {event.actionCode} on a {event.loadState} page. {formatExecutionAssistMode(event.executionAssistMode, locale)}.
+                    Action / 动作 {event.actionCode}. Page state / 页面状态 {event.loadState}. Assist mode / 辅助方式{" "}
+                    {formatExecutionAssistMode(event.executionAssistMode, locale)}.
                   </p>
                   <p className="mt-2 break-all text-sm leading-7 text-[var(--muted)]">{event.url}</p>
                 </div>
@@ -465,14 +510,14 @@ function MetricCard({
 
 function formatPersonaLabel(archetype: "Speedrunner" | "Novice" | "ChaosAgent", locale: "en" | "zh") {
   if (archetype === "ChaosAgent") {
-    return locale === "zh" ? "混沌型" : "Chaos Agent";
+    return locale === "zh" ? "混乱型 / Chaos Agent" : "Chaos Agent / 混乱型";
   }
 
   if (archetype === "Speedrunner") {
-    return locale === "zh" ? "速通型" : archetype;
+    return locale === "zh" ? "速度型 / Speedrunner" : "Speedrunner / 速度型";
   }
 
-  return locale === "zh" ? "新手型" : archetype;
+  return locale === "zh" ? "新手型 / Novice" : "Novice / 新手型";
 }
 
 function formatExecutionAssistMode(
@@ -480,18 +525,18 @@ function formatExecutionAssistMode(
   locale: "en" | "zh",
 ) {
   if (mode === "visual_only") {
-    return locale === "zh" ? "纯视觉执行" : "visual only";
+    return locale === "zh" ? "仅视觉 / visual only" : "visual only / 仅视觉";
   }
 
   if (mode === "visual_with_dom_assist") {
-    return locale === "zh" ? "视觉执行 + DOM 兜底" : "visual + DOM assist";
+    return locale === "zh" ? "视觉 + DOM 辅助 / visual + DOM assist" : "visual + DOM assist / 视觉 + DOM 辅助";
   }
 
   if (mode === "dom_only") {
-    return locale === "zh" ? "纯 DOM 兜底" : "DOM only";
+    return locale === "zh" ? "仅 DOM / DOM only" : "DOM only / 仅 DOM";
   }
 
-  return locale === "zh" ? "无直接交互" : "no direct interaction";
+  return locale === "zh" ? "无直接交互 / no direct interaction" : "no direct interaction / 无直接交互";
 }
 
 function personaTone(archetype: "Speedrunner" | "Novice" | "ChaosAgent") {

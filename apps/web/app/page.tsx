@@ -108,6 +108,44 @@ export default function Home() {
           </ul>
         </aside>
       </section>
+
+      <section className="mt-8 grid gap-6 lg:grid-cols-[1.1fr_0.9fr]">
+        <div className="panel rounded-[2rem] p-7">
+          <p className="text-sm uppercase tracking-[0.25em] text-[var(--muted)]">{t("home.howItWorks")}</p>
+          <h2 className="mt-2 text-3xl font-semibold tracking-tight">{t("home.howItWorksTitle")}</h2>
+          <div className="mt-5 grid gap-4">
+            {[
+              {
+                title: t("home.how.step1.title"),
+                body: t("home.how.step1.body"),
+              },
+              {
+                title: t("home.how.step2.title"),
+                body: t("home.how.step2.body"),
+              },
+              {
+                title: t("home.how.step3.title"),
+                body: t("home.how.step3.body"),
+              },
+            ].map((item) => (
+              <article key={item.title} className="rounded-[1.5rem] border border-[var(--line)] bg-white/60 p-5">
+                <h3 className="text-lg font-semibold">{item.title}</h3>
+                <p className="mt-3 text-sm leading-7 text-[var(--muted)]">{item.body}</p>
+              </article>
+            ))}
+          </div>
+        </div>
+
+        <aside className="panel rounded-[2rem] p-7">
+          <p className="text-sm uppercase tracking-[0.25em] text-[var(--muted)]">{t("home.reading")}</p>
+          <h2 className="mt-2 text-3xl font-semibold tracking-tight">{t("home.readingTitle")}</h2>
+          <ul className="mt-5 space-y-4 text-sm leading-7 text-[var(--muted)]">
+            <li>{t("home.reading.point1")}</li>
+            <li>{t("home.reading.point2")}</li>
+            <li>{t("home.reading.point3")}</li>
+          </ul>
+        </aside>
+      </section>
     </main>
   );
 }

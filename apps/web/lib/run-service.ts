@@ -1,12 +1,13 @@
-import { randomUUID } from "node:crypto";
+﻿import { randomUUID } from "node:crypto";
 import { defaultPersonaSet, type AgentPersona, type AgentRunResult } from "@chaos-swarm/agent-core";
 import { buildReport, type ReportDocument, type ReportInput } from "@chaos-swarm/reporting";
 import { z } from "zod";
-import { env } from "./env";
+import { canUseBrowserbase, env } from "./env";
 import { runLiveSwarm } from "./live-runner";
-import { persistRunRecord } from "./persistence";
+import { getPersistenceMode, loadRunRecord, persistRunRecord } from "./persistence";
+import { applyReadableReport, enhanceReadableReport } from "./report-llm";
 import { getScenario, listScenarios, type DemoScenarioDefinition } from "./scenarios";
-import { getStore } from "./store";
+import { upsertRunInStore } from "./store";
 import type { PersonaSnapshot, RunRecord, StageSnapshot, TimelineEvent } from "./types";
 
 const createRunSchema = z.object({
@@ -362,6 +363,7 @@ function buildSummary(agentRuns: AgentRunResult[]) {
 
 function buildWarnings(strictVisualMode: boolean) {
   const warnings: string[] = [];
+  const persistenceMode = getPersistenceMode();
 
   if (env.openAiApiKey) {
     warnings.push(`OpenAI autonomous agent runtime is active via ${env.agentModel}.`);
@@ -373,6 +375,12 @@ function buildWarnings(strictVisualMode: boolean) {
     warnings.push("Browser execution is still in simulation mode.");
   } else if (env.executionMode === "local") {
     warnings.push("Local Playwright execution is active on this workstation; Browserbase fan-out is not enabled yet.");
+  } else if (env.executionMode === "hybrid") {
+    warnings.push(
+      canUseBrowserbase()
+        ? "Browserbase cloud execution is active for public runs."
+        : "Hybrid execution is configured, but Browserbase credentials are incomplete.",
+    );
   }
 
   if (strictVisualMode) {
@@ -381,8 +389,10 @@ function buildWarnings(strictVisualMode: boolean) {
     warnings.push("Hybrid visual mode is enabled: coordinate-first execution can fall back to DOM locators when needed.");
   }
 
-  if (!env.supabaseServiceRoleKey || !env.supabaseUrl) {
+  if (persistenceMode === "unavailable") {
     warnings.push("Supabase persistence is disabled.");
+  } else {
+    warnings.push(`Supabase persistence is active via ${persistenceMode}.`);
   }
 
   return warnings;
@@ -394,6 +404,8 @@ function createPlaceholderReport(
   agentCount: number,
   strictVisualMode: boolean,
 ): ReportDocument {
+  const generatedAt = new Date().toISOString();
+
   return {
     title: `Chaos Swarm report for ${goal}`,
     summary: `Run in progress against ${targetUrl}. Waiting for agent telemetry before rendering the final report.`,
@@ -403,7 +415,7 @@ function createPlaceholderReport(
         body: "The swarm is still executing. EFI, failure clusters, and the narrative report will populate as agents finish.",
       },
     ],
-    generatedAt: new Date().toISOString(),
+    generatedAt,
     efi: {
       score: 0,
       components: [],
@@ -420,6 +432,15 @@ function createPlaceholderReport(
       domOnlyActions: 0,
       visualPurity: 100,
       domAssistRate: 0,
+    },
+    readable: {
+      overview: {
+        en: "The run is still executing. Once enough telemetry arrives, the report will explain the result in plain language.",
+        zh: "运行仍在进行中。等足够多的遥测数据返回后，报告会用更容易理解的自然语言解释这次结果。",
+      },
+      metrics: [],
+      findings: [],
+      agentStories: [],
     },
     metadata: {
       targetUrl,
@@ -450,7 +471,7 @@ function upsertAgentRun(record: RunRecord, scenario: DemoScenarioDefinition, nex
   refreshDerivedFields(record, scenario);
 }
 
-function finalizeRun(record: RunRecord) {
+async function finalizeRun(record: RunRecord) {
   const reportInput: ReportInput = {
     targetUrl: record.targetUrl,
     goal: record.goal,
@@ -458,6 +479,7 @@ function finalizeRun(record: RunRecord) {
   };
 
   record.report = buildReport(reportInput);
+  record.report = applyReadableReport(record.report, await enhanceReadableReport(record));
   record.completedAt = new Date().toISOString();
 }
 
@@ -497,7 +519,7 @@ async function executeRun(record: RunRecord, scenario: DemoScenarioDefinition, p
     record.agentRuns = results;
     record.status = "completed";
     refreshDerivedFields(record, scenario);
-    finalizeRun(record);
+    await finalizeRun(record);
     await persistBestEffort(record);
   } catch (error) {
     record.status = "failed";
@@ -562,7 +584,7 @@ export async function createRun(input: unknown) {
     );
   }
 
-  getStore().runs.set(record.id, record);
+  upsertRunInStore(record);
   await persistBestEffort(record);
 
   const job = executeRun(record, scenario, personas, maxSteps);
@@ -572,6 +594,6 @@ export async function createRun(input: unknown) {
   return record;
 }
 
-export function getRunRecord(id: string) {
-  return getStore().runs.get(id) ?? null;
+export async function getRunRecord(id: string) {
+  return loadRunRecord(id);
 }

@@ -37,6 +37,30 @@ export interface ReportSection {
   body: string;
 }
 
+export interface LocalizedReportCopy {
+  en: string;
+  zh: string;
+}
+
+export interface ReadableInsight {
+  title: LocalizedReportCopy;
+  body: LocalizedReportCopy;
+}
+
+export interface AgentStory {
+  agentId: string;
+  persona: string;
+  status: "completed" | "failed";
+  summary: LocalizedReportCopy;
+}
+
+export interface ReadableReport {
+  overview: LocalizedReportCopy;
+  metrics: ReadableInsight[];
+  findings: ReadableInsight[];
+  agentStories: AgentStory[];
+}
+
 export interface ExecutionQuality {
   strictVisualMode: boolean;
   totalInteractionActions: number;
@@ -58,6 +82,7 @@ export interface ReportDocument {
   highlightReel: string[];
   heatmap: HeatmapPoint[];
   executionQuality: ExecutionQuality;
+  readable: ReadableReport;
   metadata: Record<string, unknown>;
 }
 

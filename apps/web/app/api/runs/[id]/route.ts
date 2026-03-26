@@ -7,7 +7,7 @@ interface RunRouteProps {
 
 export async function GET(_: Request, { params }: RunRouteProps) {
   const { id } = await params;
-  const record = getRunRecord(id);
+  const record = await getRunRecord(id);
 
   if (!record) {
     return NextResponse.json({ error: "Run not found." }, { status: 404 });
