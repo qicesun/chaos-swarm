@@ -6,7 +6,7 @@ export function LanguageToggle() {
   const { locale, setLocale, t } = useTranslations();
 
   return (
-    <div className="fixed right-4 top-4 z-50 rounded-full border border-[var(--line)] bg-[rgba(255,252,246,0.88)] p-1 shadow-[0_20px_40px_rgba(23,20,18,0.08)] backdrop-blur">
+    <div className="rounded-full border border-[var(--line)] bg-[rgba(255,252,246,0.88)] p-1 shadow-[0_12px_30px_rgba(23,20,18,0.06)] backdrop-blur">
       <div className="flex items-center gap-1">
         <span className="px-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--muted)]">
           {t("language.label")}

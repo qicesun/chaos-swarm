@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { cookies } from "next/headers";
 import { IBM_Plex_Mono, Space_Grotesk } from "next/font/google";
-import { LanguageToggle } from "@/components/language-toggle";
+import { AppHeader } from "@/components/app-header";
 import { LocaleProvider } from "@/components/locale-provider";
 import type { Locale } from "@/lib/i18n";
 import "./globals.css";
@@ -39,7 +39,7 @@ export default async function RootLayout({
       <body className="min-h-full flex flex-col">
         <LocaleProvider initialLocale={initialLocale}>
           <div className="grain" />
-          <LanguageToggle />
+          <AppHeader />
           {children}
         </LocaleProvider>
       </body>

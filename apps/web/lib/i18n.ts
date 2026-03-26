@@ -8,6 +8,8 @@ type TranslationValues = Record<string, string | number>;
 
 const messages = {
   en: {
+    "nav.home": "Home",
+    "nav.launch": "Launch run",
     "language.label": "Language",
     "language.english": "EN",
     "language.chinese": "中文",
@@ -155,6 +157,8 @@ const messages = {
     "notFound.back": "Back to overview",
   },
   zh: {
+    "nav.home": "首页",
+    "nav.launch": "启动运行",
     "language.label": "语言",
     "language.english": "EN",
     "language.chinese": "中文",
