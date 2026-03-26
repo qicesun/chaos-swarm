@@ -1,5 +1,7 @@
 import type { Metadata } from "next";
 import { IBM_Plex_Mono, Space_Grotesk } from "next/font/google";
+import { LanguageToggle } from "@/components/language-toggle";
+import { LocaleProvider } from "@/components/locale-provider";
 import "./globals.css";
 
 const display = Space_Grotesk({
@@ -29,8 +31,11 @@ export default function RootLayout({
       className={`${display.variable} ${mono.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col">
-        <div className="grain" />
-        {children}
+        <LocaleProvider>
+          <div className="grain" />
+          <LanguageToggle />
+          {children}
+        </LocaleProvider>
       </body>
     </html>
   );

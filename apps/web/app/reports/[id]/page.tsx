@@ -1,5 +1,7 @@
 import { notFound } from "next/navigation";
 import Link from "next/link";
+import type { ReactNode } from "react";
+import { T } from "@/components/locale-provider";
 import { getRunRecord } from "@/lib/run-service";
 
 interface ReportPageProps {
@@ -18,17 +20,21 @@ export default async function ReportPage({ params }: ReportPageProps) {
     return (
       <main className="mx-auto flex min-h-screen w-full max-w-4xl flex-col px-6 py-8 lg:px-10">
         <section className="panel-strong rounded-[2rem] px-8 py-9">
-          <p className="text-sm uppercase tracking-[0.3em] text-[var(--muted)]">Report</p>
-          <h1 className="mt-3 text-4xl font-semibold tracking-[-0.04em]">Report is still rendering</h1>
+          <p className="text-sm uppercase tracking-[0.3em] text-[var(--muted)]">
+            <T k="report.label" />
+          </p>
+          <h1 className="mt-3 text-4xl font-semibold tracking-[-0.04em]">
+            <T k="report.pendingTitle" />
+          </h1>
           <p className="mt-4 max-w-3xl text-lg leading-8 text-[var(--muted)]">
-            The swarm has not reached a terminal state yet. Wait for the run to finish, then reopen this report.
+            <T k="report.pendingBody" />
           </p>
           <div className="mt-8">
             <Link
               href={`/runs/${record.id}`}
               className="rounded-full bg-[var(--accent)] px-5 py-3 text-sm font-semibold text-white"
             >
-              Back to live run
+              <T k="report.backToRun" />
             </Link>
           </div>
         </section>
@@ -43,7 +49,9 @@ export default async function ReportPage({ params }: ReportPageProps) {
       <section className="panel-strong rounded-[2rem] px-8 py-9">
         <div className="flex flex-wrap items-start justify-between gap-6">
           <div className="max-w-4xl">
-            <p className="text-sm uppercase tracking-[0.3em] text-[var(--muted)]">Report</p>
+            <p className="text-sm uppercase tracking-[0.3em] text-[var(--muted)]">
+              <T k="report.label" />
+            </p>
             <h1 className="mt-3 text-4xl font-semibold tracking-[-0.04em]">{report.title}</h1>
             <p className="mt-4 text-lg leading-8 text-[var(--muted)]">{report.summary}</p>
           </div>
@@ -52,52 +60,58 @@ export default async function ReportPage({ params }: ReportPageProps) {
               href={`/api/reports/${record.id}/full?format=markdown`}
               className="rounded-full bg-[var(--accent)] px-5 py-3 text-sm font-semibold text-white"
             >
-              Download full markdown
+              <T k="report.downloadMarkdown" />
             </a>
             <a
               href={`/api/reports/${record.id}/full?format=json`}
               className="rounded-full border border-[var(--line)] px-5 py-3 text-sm font-semibold"
             >
-              Download full JSON
+              <T k="report.downloadJson" />
             </a>
             <Link
               href={`/runs/${record.id}`}
               className="rounded-full border border-[var(--line)] px-5 py-3 text-sm font-semibold"
             >
-              Back to run
+              <T k="report.backToRun" />
             </Link>
           </div>
         </div>
       </section>
 
       <section className="mt-8 panel rounded-[2rem] p-7">
-        <p className="text-sm uppercase tracking-[0.25em] text-[var(--muted)]">Portable analysis pack</p>
-        <h2 className="mt-2 text-3xl font-semibold tracking-tight">Hand off the whole run, not just the dashboard</h2>
+        <p className="text-sm uppercase tracking-[0.25em] text-[var(--muted)]">
+          <T k="report.portablePack" />
+        </p>
+        <h2 className="mt-2 text-3xl font-semibold tracking-tight">
+          <T k="report.portablePackTitle" />
+        </h2>
         <p className="mt-4 max-w-4xl text-sm leading-7 text-[var(--muted)]">
-          The full markdown export contains runtime warnings, stage and persona summaries, the full event timeline,
-          and each agent&apos;s step log. Paste that document back into Codex to continue diagnosis without losing
-          execution context.
+          <T k="report.portablePackBody" />
         </p>
       </section>
 
       <section className="mt-8 grid gap-5 lg:grid-cols-4">
         <MetricCard label="EFI" value={String(report.efi.score)} />
-        <MetricCard label="Failure clusters" value={String(report.failureClusters.length)} />
-        <MetricCard label="Highlights" value={String(report.highlightReel.length)} />
-        <MetricCard label="Heat points" value={String(report.heatmap.length)} />
+        <MetricCard label={<T k="report.failureClustersMetric" />} value={String(report.failureClusters.length)} />
+        <MetricCard label={<T k="report.highlights" />} value={String(report.highlightReel.length)} />
+        <MetricCard label={<T k="report.heatPoints" />} value={String(report.heatmap.length)} />
       </section>
 
       <section className="mt-8 grid gap-6 lg:grid-cols-[1fr_0.95fr]">
         <article className="panel rounded-[2rem] p-7">
-          <p className="text-sm uppercase tracking-[0.25em] text-[var(--muted)]">EFI breakdown</p>
-          <h2 className="mt-2 text-3xl font-semibold tracking-tight">Experience friction index</h2>
+          <p className="text-sm uppercase tracking-[0.25em] text-[var(--muted)]">
+            <T k="report.efiBreakdown" />
+          </p>
+          <h2 className="mt-2 text-3xl font-semibold tracking-tight">
+            <T k="report.efiTitle" />
+          </h2>
           <div className="mt-6 space-y-4">
             {report.efi.components.map((component) => (
               <div key={component.name}>
                 <div className="flex items-center justify-between gap-4">
                   <span className="text-sm font-semibold uppercase tracking-[0.18em]">{component.name}</span>
                   <span className="font-mono text-sm text-[var(--muted)]">
-                    {component.score} / contribution {component.contribution}
+                    <T k="report.contribution" values={{ score: component.score, contribution: component.contribution }} />
                   </span>
                 </div>
                 <div className="mt-2 h-3 overflow-hidden rounded-full bg-[rgba(23,20,18,0.08)]">
@@ -112,8 +126,12 @@ export default async function ReportPage({ params }: ReportPageProps) {
         </article>
 
         <aside className="panel rounded-[2rem] p-7">
-          <p className="text-sm uppercase tracking-[0.25em] text-[var(--muted)]">Funnel</p>
-          <h2 className="mt-2 text-3xl font-semibold tracking-tight">Synthetic drop-off</h2>
+          <p className="text-sm uppercase tracking-[0.25em] text-[var(--muted)]">
+            <T k="report.funnel" />
+          </p>
+          <h2 className="mt-2 text-3xl font-semibold tracking-tight">
+            <T k="report.funnelTitle" />
+          </h2>
           <div className="mt-5 space-y-4">
             {report.funnel.map((stage) => (
               <div key={stage.name} className="rounded-[1.4rem] border border-[var(--line)] bg-white/60 p-4">
@@ -123,7 +141,9 @@ export default async function ReportPage({ params }: ReportPageProps) {
                     {stage.completed}/{stage.total}
                   </span>
                 </div>
-                <p className="mt-2 text-sm text-[var(--muted)]">{stage.dropped} agents dropped at this boundary.</p>
+                <p className="mt-2 text-sm text-[var(--muted)]">
+                  <T k="report.funnelDropped" values={{ count: stage.dropped }} />
+                </p>
               </div>
             ))}
           </div>
@@ -132,12 +152,16 @@ export default async function ReportPage({ params }: ReportPageProps) {
 
       <section className="mt-8 grid gap-6 lg:grid-cols-[0.95fr_1.05fr]">
         <article className="panel rounded-[2rem] p-7">
-          <p className="text-sm uppercase tracking-[0.25em] text-[var(--muted)]">Failure clusters</p>
-          <h2 className="mt-2 text-3xl font-semibold tracking-tight">What bent the swarm</h2>
+          <p className="text-sm uppercase tracking-[0.25em] text-[var(--muted)]">
+            <T k="report.failureClusters" />
+          </p>
+          <h2 className="mt-2 text-3xl font-semibold tracking-tight">
+            <T k="report.failureTitle" />
+          </h2>
           <div className="mt-5 space-y-4">
             {report.failureClusters.length === 0 ? (
               <div className="rounded-[1.4rem] border border-[rgba(32,109,71,0.16)] bg-[rgba(32,109,71,0.08)] p-4 text-sm text-[var(--success)]">
-                No failure clusters were observed in this run.
+                <T k="report.noFailureClusters" />
               </div>
             ) : (
               report.failureClusters.map((cluster) => (
@@ -157,8 +181,12 @@ export default async function ReportPage({ params }: ReportPageProps) {
         </article>
 
         <article className="panel rounded-[2rem] p-7">
-          <p className="text-sm uppercase tracking-[0.25em] text-[var(--muted)]">Friction heat</p>
-          <h2 className="mt-2 text-3xl font-semibold tracking-tight">Telemetry intensity map</h2>
+          <p className="text-sm uppercase tracking-[0.25em] text-[var(--muted)]">
+            <T k="report.frictionHeat" />
+          </p>
+          <h2 className="mt-2 text-3xl font-semibold tracking-tight">
+            <T k="report.frictionHeatTitle" />
+          </h2>
           <div className="mt-5 rounded-[1.8rem] border border-[var(--line)] bg-[linear-gradient(180deg,rgba(255,255,255,0.62),rgba(244,232,215,0.72))] p-4">
             <div className="relative aspect-[1.35/1] overflow-hidden rounded-[1.4rem] border border-dashed border-[var(--line)] bg-[radial-gradient(circle_at_center,rgba(200,76,38,0.08),transparent_42%)]">
               {report.heatmap.slice(0, 42).map((point, index) => (
@@ -175,15 +203,19 @@ export default async function ReportPage({ params }: ReportPageProps) {
               ))}
             </div>
             <p className="mt-3 text-sm leading-7 text-[var(--muted)]">
-              The current heatmap uses frustration and step depth as a proxy surface until screenshot overlays are added.
+              <T k="report.heatNote" />
             </p>
           </div>
         </article>
       </section>
 
       <section className="mt-8 panel rounded-[2rem] p-7">
-        <p className="text-sm uppercase tracking-[0.25em] text-[var(--muted)]">Narrative</p>
-        <h2 className="mt-2 text-3xl font-semibold tracking-tight">Analyst summary</h2>
+        <p className="text-sm uppercase tracking-[0.25em] text-[var(--muted)]">
+          <T k="report.narrative" />
+        </p>
+        <h2 className="mt-2 text-3xl font-semibold tracking-tight">
+          <T k="report.narrativeTitle" />
+        </h2>
         <div className="mt-5 grid gap-4 lg:grid-cols-2">
           {report.sections.map((section) => (
             <div key={section.heading} className="rounded-[1.5rem] border border-[var(--line)] bg-white/60 p-5">
@@ -197,7 +229,7 @@ export default async function ReportPage({ params }: ReportPageProps) {
   );
 }
 
-function MetricCard({ label, value }: { label: string; value: string }) {
+function MetricCard({ label, value }: { label: ReactNode; value: string }) {
   return (
     <div className="panel rounded-[1.7rem] p-5">
       <p className="text-sm uppercase tracking-[0.2em] text-[var(--muted)]">{label}</p>

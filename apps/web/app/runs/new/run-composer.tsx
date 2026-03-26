@@ -2,6 +2,8 @@
 
 import { useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
+import { useTranslations } from "@/components/locale-provider";
+import { localizeScenario } from "@/lib/i18n";
 import type { DemoScenarioDefinition, DemoScenarioId } from "@/lib/scenarios";
 
 interface RunComposerProps {
@@ -10,6 +12,7 @@ interface RunComposerProps {
 
 export function RunComposer({ scenarios }: RunComposerProps) {
   const router = useRouter();
+  const { locale, t } = useTranslations();
   const [isPending, startTransition] = useTransition();
   const initialScenario = scenarios[0];
   const [scenarioId, setScenarioId] = useState<DemoScenarioId>(initialScenario?.id ?? "saucedemo");
@@ -21,6 +24,14 @@ export function RunComposer({ scenarios }: RunComposerProps) {
   const selectedScenario = useMemo(
     () => scenarios.find((scenario) => scenario.id === scenarioId) ?? scenarios[0],
     [scenarioId, scenarios],
+  );
+  const localizedScenarios = useMemo(
+    () => scenarios.map((scenario) => localizeScenario(locale, scenario)),
+    [locale, scenarios],
+  );
+  const localizedSelectedScenario = useMemo(
+    () => (selectedScenario ? localizeScenario(locale, selectedScenario) : null),
+    [locale, selectedScenario],
   );
 
   useEffect(() => {
@@ -50,7 +61,7 @@ export function RunComposer({ scenarios }: RunComposerProps) {
       });
 
       if (!response.ok) {
-        throw new Error("Run creation failed.");
+        throw new Error(t("composer.runCreationFailed"));
       }
 
       const payload = (await response.json()) as { runId: string };
@@ -59,20 +70,20 @@ export function RunComposer({ scenarios }: RunComposerProps) {
         router.push(`/runs/${payload.runId}`);
       });
     } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : "Run creation failed.");
+      setError(requestError instanceof Error ? requestError.message : t("composer.runCreationFailed"));
     }
   }
 
-  if (!selectedScenario) {
+  if (!selectedScenario || !localizedSelectedScenario) {
     return null;
   }
 
   return (
     <section className="mt-8 grid gap-6 lg:grid-cols-[1.15fr_0.85fr]">
       <div className="panel rounded-[2rem] p-7">
-        <p className="text-sm uppercase tracking-[0.25em] text-[var(--muted)]">Scenario</p>
+        <p className="text-sm uppercase tracking-[0.25em] text-[var(--muted)]">{t("composer.scenario")}</p>
         <div className="mt-4 grid gap-4">
-          {scenarios.map((scenario) => {
+          {localizedScenarios.map((scenario) => {
             const selected = scenario.id === scenarioId;
 
             return (
@@ -92,7 +103,7 @@ export function RunComposer({ scenarios }: RunComposerProps) {
                     <h2 className="mt-1 text-xl font-semibold">{scenario.name}</h2>
                   </div>
                   <span className="rounded-full bg-white/70 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-[var(--foreground)]">
-                    {scenario.frames.length} stages
+                    {t("home.stages", { count: scenario.frames.length })}
                   </span>
                 </div>
                 <p className="mt-3 text-sm leading-7 text-[var(--muted)]">{scenario.description}</p>
@@ -103,21 +114,21 @@ export function RunComposer({ scenarios }: RunComposerProps) {
       </div>
 
       <div className="panel-strong rounded-[2rem] p-7">
-        <p className="text-sm uppercase tracking-[0.25em] text-[var(--muted)]">Run controls</p>
+        <p className="text-sm uppercase tracking-[0.25em] text-[var(--muted)]">{t("composer.runControls")}</p>
         <div className="mt-5 space-y-5">
           <label className="block">
-            <span className="text-sm font-semibold">Goal override</span>
+            <span className="text-sm font-semibold">{t("composer.goalOverride")}</span>
             <textarea
               value={goal}
               onChange={(event) => setGoal(event.target.value)}
-              placeholder={selectedScenario.goal}
+              placeholder={localizedSelectedScenario.goal}
               className="mt-2 min-h-28 w-full rounded-[1.25rem] border border-[var(--line)] bg-white/75 px-4 py-3 outline-none transition focus:border-[var(--accent)]"
             />
           </label>
 
           <label className="block">
             <div className="flex items-center justify-between">
-              <span className="text-sm font-semibold">Agent count</span>
+              <span className="text-sm font-semibold">{t("composer.agentCount")}</span>
               <span className="font-mono text-sm">{agentCount}</span>
             </div>
             <input
@@ -133,7 +144,7 @@ export function RunComposer({ scenarios }: RunComposerProps) {
 
           <label className="block">
             <div className="flex items-center justify-between">
-              <span className="text-sm font-semibold">Step budget</span>
+              <span className="text-sm font-semibold">{t("composer.stepBudget")}</span>
               <span className="font-mono text-sm">{maxSteps}</span>
             </div>
             <input
@@ -146,19 +157,18 @@ export function RunComposer({ scenarios }: RunComposerProps) {
               onChange={(event) => setMaxSteps(Number(event.target.value))}
             />
             <p className="mt-2 text-xs leading-6 text-[var(--muted)]">
-              Recommended {selectedScenario.recommendedMaxSteps} steps. This scenario enforces a floor of{" "}
-              {selectedScenario.minimumMaxSteps} so the swarm can reach a meaningful end state.
+              {t("composer.recommendedSteps", {
+                recommended: selectedScenario.recommendedMaxSteps,
+                minimum: selectedScenario.minimumMaxSteps,
+              })}
             </p>
           </label>
         </div>
 
         <div className="mt-8 rounded-[1.5rem] border border-[var(--line)] bg-white/60 p-5">
-          <p className="text-sm uppercase tracking-[0.18em] text-[var(--muted)]">Execution mode</p>
-          <h3 className="mt-2 text-lg font-semibold">Live local execution, cloud-ready</h3>
-          <p className="mt-2 text-sm leading-7 text-[var(--muted)]">
-            This build executes flows with local Playwright contexts and streams timeline updates live. Browserbase and
-            Trigger.dev remain the next scale layer for cloud fan-out.
-          </p>
+          <p className="text-sm uppercase tracking-[0.18em] text-[var(--muted)]">{t("composer.executionMode")}</p>
+          <h3 className="mt-2 text-lg font-semibold">{t("composer.executionTitle")}</h3>
+          <p className="mt-2 text-sm leading-7 text-[var(--muted)]">{t("composer.executionBody")}</p>
         </div>
 
         {error ? (
@@ -173,7 +183,7 @@ export function RunComposer({ scenarios }: RunComposerProps) {
           disabled={isPending}
           className="mt-6 w-full rounded-full bg-[var(--accent)] px-6 py-3 text-sm font-semibold text-white transition hover:translate-y-[-1px] disabled:cursor-not-allowed disabled:opacity-60"
         >
-          {isPending ? "Launching..." : "Launch chaos swarm"}
+          {isPending ? t("composer.launching") : t("composer.launch")}
         </button>
       </div>
     </section>
