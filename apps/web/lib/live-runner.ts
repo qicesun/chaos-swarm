@@ -174,6 +174,26 @@ async function assertUsableSurface(page: Page) {
   }
 }
 
+async function gotoWithRetry(page: Page, url: string, options: Parameters<Page["goto"]>[1], attempts = 2) {
+  let lastError: unknown;
+
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      return await page.goto(url, options);
+    } catch (error) {
+      lastError = error;
+
+      if (attempt === attempts) {
+        break;
+      }
+
+      await sleep(500 * attempt);
+    }
+  }
+
+  throw lastError instanceof Error ? lastError : new Error(String(lastError));
+}
+
 async function snapshotPage(page: Page, fallbackUrl: string, explicitFlags: string[] = []): Promise<PageState> {
   const url = page.url() || fallbackUrl;
   const title = await page.title().catch(() => undefined);
@@ -402,7 +422,7 @@ async function runSaucedemoFlow(
   state: { frustration: number; confidence: number },
   callbacks: LiveSwarmCallbacks,
 ) {
-  await page.goto(input.config.targetUrl, { waitUntil: "domcontentloaded", timeout: 20_000 });
+  await gotoWithRetry(page, input.config.targetUrl, { waitUntil: "domcontentloaded", timeout: 20_000 });
   await sleep(paceMs(input.persona, "load"));
 
   await appendStep(
@@ -563,7 +583,7 @@ async function runAutomationExerciseFlow(
   state: { frustration: number; confidence: number },
   callbacks: LiveSwarmCallbacks,
 ) {
-  await page.goto(input.config.targetUrl, { waitUntil: "domcontentloaded", timeout: 20_000 });
+  await gotoWithRetry(page, input.config.targetUrl, { waitUntil: "domcontentloaded", timeout: 20_000 });
   await sleep(paceMs(input.persona, "load"));
 
   await appendStep(
@@ -700,7 +720,7 @@ async function runAutomationExerciseFlow(
     () => page.locator("a[href='/view_cart']").filter({ hasText: /View Cart/i }),
     () => page.getByRole("link", { name: /view cart/i }),
   ]).catch(async () => {
-    await page.goto("https://automationexercise.com/view_cart", {
+    await gotoWithRetry(page, "https://automationexercise.com/view_cart", {
       waitUntil: "domcontentloaded",
       timeout: 15_000,
     });
@@ -741,7 +761,7 @@ async function runTheInternetFlow(
   state: { frustration: number; confidence: number },
   callbacks: LiveSwarmCallbacks,
 ) {
-  await page.goto(input.config.targetUrl, { waitUntil: "domcontentloaded", timeout: 20_000 });
+  await gotoWithRetry(page, input.config.targetUrl, { waitUntil: "domcontentloaded", timeout: 20_000 });
   await sleep(paceMs(input.persona, "load"));
 
   await appendStep(
@@ -874,7 +894,7 @@ async function runExpandTestingFlow(
   state: { frustration: number; confidence: number },
   callbacks: LiveSwarmCallbacks,
 ) {
-  await page.goto(input.config.targetUrl, { waitUntil: "domcontentloaded", timeout: 20_000 });
+  await gotoWithRetry(page, input.config.targetUrl, { waitUntil: "domcontentloaded", timeout: 20_000 });
   await sleep(paceMs(input.persona, "load"));
 
   await appendStep(
@@ -977,7 +997,7 @@ async function runParabankFlow(
   state: { frustration: number; confidence: number },
   callbacks: LiveSwarmCallbacks,
 ) {
-  await page.goto(input.config.targetUrl, { waitUntil: "domcontentloaded", timeout: 20_000 });
+  await gotoWithRetry(page, input.config.targetUrl, { waitUntil: "domcontentloaded", timeout: 20_000 });
   await sleep(paceMs(input.persona, "load"));
 
   await appendStep(

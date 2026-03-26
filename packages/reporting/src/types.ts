@@ -18,6 +18,7 @@ export interface FunnelStage {
 }
 
 export interface FailureCluster {
+  signature: string;
   label: string;
   count: number;
   personas: string[];

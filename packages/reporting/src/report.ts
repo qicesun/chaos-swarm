@@ -33,6 +33,65 @@ function latestStep(run: AgentRunResultLike) {
   return run.steps.at(-1);
 }
 
+const BLOCKED_PATTERN = /robot or human|captcha|access denied|verify you are human|blocked|cloudflare|invalid ssl certificate|attention required/i;
+const TIMEOUT_PATTERN = /timeout|timed out|page\.goto|waitforurl|waiting until/i;
+
+function normalizeToken(value: string) {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 48);
+}
+
+function classifyFailure(run: AgentRunResultLike) {
+  const last = latestStep(run);
+  const errorBlob = [last?.action.details, last?.observation.summary, ...run.finalPage.errorFlags]
+    .filter(Boolean)
+    .join(" | ");
+
+  if (!last) {
+    return {
+      signature: "unstarted",
+      label: "Run never started",
+    };
+  }
+
+  if (run.steps.length >= run.config.maxSteps && run.finalPage.errorFlags.length === 0) {
+    return {
+      signature: `budget_exhausted_after_${last.action.kind}`,
+      label: "Step budget exhausted before completion",
+    };
+  }
+
+  if (BLOCKED_PATTERN.test(errorBlob)) {
+    return {
+      signature: "environment_blocked",
+      label: "Site or environment blocked execution",
+    };
+  }
+
+  if (TIMEOUT_PATTERN.test(errorBlob)) {
+    return {
+      signature: `navigation_timeout_after_${last.decision.kind}`,
+      label: "Navigation or page-load timeout",
+    };
+  }
+
+  if (last.action.kind === "escalate" || run.finalPage.errorFlags.length > 0) {
+    const topFlag = run.finalPage.errorFlags[0] ?? last.action.details;
+    return {
+      signature: `runner_error_${normalizeToken(topFlag || "unknown")}`,
+      label: "Execution runner error",
+    };
+  }
+
+  return {
+    signature: `incomplete_after_${last.decision.kind}_${last.action.kind}_${run.finalPage.loadState}`,
+    label: `Incomplete after ${last.action.kind}`,
+  };
+}
+
 function computeEfiComponents(agentRuns: AgentRunResultLike[]): EfiComponent[] {
   const frustrations = agentRuns.map((run) => latestStep(run)?.frustration ?? 0);
   const failures = agentRuns.map((run) => (run.failed ? 1 : 0));
@@ -105,11 +164,10 @@ function buildFailureClusters(agentRuns: AgentRunResultLike[]): FailureCluster[]
       continue;
     }
     const last = latestStep(run);
-    const label = last
-      ? `${last.decision.kind}:${last.action.kind}:${run.finalPage.loadState}`
-      : "unstarted";
-    const existing = groups.get(label) ?? {
-      label,
+    const classification = classifyFailure(run);
+    const existing = groups.get(classification.signature) ?? {
+      signature: classification.signature,
+      label: classification.label,
       count: 0,
       personas: [],
       reasons: [],
@@ -120,7 +178,7 @@ function buildFailureClusters(agentRuns: AgentRunResultLike[]): FailureCluster[]
       existing.reasons.push(last.observation.summary);
       existing.reasons.push(last.action.details);
     }
-    groups.set(label, existing);
+    groups.set(classification.signature, existing);
   }
 
   return [...groups.values()].map((cluster) => ({
@@ -172,7 +230,7 @@ function buildSections(report: ReportDocument): ReportSection[] {
       body: report.failureClusters.length === 0
         ? "No failures observed in this run."
         : report.failureClusters
-            .map((cluster) => `${cluster.label} (${cluster.count}): ${cluster.reasons.join("; ")}`)
+            .map((cluster) => `${cluster.label} [${cluster.signature}] (${cluster.count}): ${cluster.reasons.join("; ")}`)
             .join("\n"),
     },
     {
@@ -232,7 +290,7 @@ export function renderMarkdown(document: ReportDocument): string {
     "## Failure Clusters",
     ...(document.failureClusters.length === 0
       ? ["- None"]
-      : document.failureClusters.map((cluster) => `- ${cluster.label}: ${cluster.count}`)),
+      : document.failureClusters.map((cluster) => `- ${cluster.label} [${cluster.signature}]: ${cluster.count}`)),
     "",
     "## Highlight Reel",
     ...(document.highlightReel.length === 0 ? ["- None"] : document.highlightReel.map((item) => `- ${item}`)),

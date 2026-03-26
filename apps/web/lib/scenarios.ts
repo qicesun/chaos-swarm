@@ -20,6 +20,8 @@ export interface DemoScenarioDefinition {
   targetUrl: string;
   goal: string;
   description: string;
+  recommendedMaxSteps: number;
+  minimumMaxSteps: number;
   frames: DemoScenarioFrame[];
 }
 
@@ -31,6 +33,8 @@ export const scenarioCatalog: Record<DemoScenarioId, DemoScenarioDefinition> = {
     targetUrl: "https://www.saucedemo.com/",
     goal: "Log in and add a popular inventory item to cart.",
     description: "Stable public commerce demo used as the fastest baseline for login comprehension and cart CTA clarity.",
+    recommendedMaxSteps: 6,
+    minimumMaxSteps: 6,
     frames: [
       {
         id: "login",
@@ -62,6 +66,8 @@ export const scenarioCatalog: Record<DemoScenarioId, DemoScenarioDefinition> = {
     targetUrl: "https://automationexercise.com/products",
     goal: "Search for Blue Top, inspect the product detail, and add it to cart.",
     description: "Public automation-practice storefront with real search, product detail, and cart surfaces but without aggressive bot controls.",
+    recommendedMaxSteps: 6,
+    minimumMaxSteps: 6,
     frames: [
       {
         id: "catalog",
@@ -100,6 +106,8 @@ export const scenarioCatalog: Record<DemoScenarioId, DemoScenarioDefinition> = {
     targetUrl: "https://the-internet.herokuapp.com/",
     goal: "Open the Form Authentication module and sign into the secure area.",
     description: "Minimal public auth practice site that isolates information scent, form clarity, and secure-area confirmation.",
+    recommendedMaxSteps: 5,
+    minimumMaxSteps: 5,
     frames: [
       {
         id: "directory",
@@ -131,6 +139,8 @@ export const scenarioCatalog: Record<DemoScenarioId, DemoScenarioDefinition> = {
     targetUrl: "https://practice.expandtesting.com/form-validation",
     goal: "Complete the validation form with valid inputs and reach the confirmation page.",
     description: "Generic public form scenario with text, telephone, date, and select controls that demonstrates non-commerce interaction coverage.",
+    recommendedMaxSteps: 4,
+    minimumMaxSteps: 4,
     frames: [
       {
         id: "validation-form",
@@ -155,6 +165,8 @@ export const scenarioCatalog: Record<DemoScenarioId, DemoScenarioDefinition> = {
     targetUrl: "https://parabank.parasoft.com/parabank/register.htm",
     goal: "Create a new demo banking account and reach the signed-in dashboard.",
     description: "Finance-style onboarding flow with a denser registration form and a post-submit account-services surface.",
+    recommendedMaxSteps: 4,
+    minimumMaxSteps: 4,
     frames: [
       {
         id: "registration-form",

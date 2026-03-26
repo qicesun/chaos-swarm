@@ -324,6 +324,7 @@ export async function createRun(input: unknown) {
   const scenario = getScenario(payload.demoScenario);
   const runId = randomUUID();
   const personas = selectPersonas(payload.agentCount);
+  const maxSteps = Math.max(payload.maxSteps, scenario.minimumMaxSteps);
   const now = new Date().toISOString();
   const record: RunRecord = {
     id: runId,
@@ -351,10 +352,16 @@ export async function createRun(input: unknown) {
     warnings: buildWarnings(),
   };
 
+  if (maxSteps !== payload.maxSteps) {
+    record.warnings.push(
+      `Step budget raised from ${payload.maxSteps} to ${maxSteps} to satisfy the ${scenario.siteLabel} scenario floor.`,
+    );
+  }
+
   getStore().runs.set(record.id, record);
   await persistBestEffort(record);
 
-  const job = executeRun(record, scenario, personas, payload.maxSteps);
+  const job = executeRun(record, scenario, personas, maxSteps);
   activeJobs.set(record.id, job);
   void job;
 

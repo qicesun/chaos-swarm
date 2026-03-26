@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import type { DemoScenarioDefinition, DemoScenarioId } from "@/lib/scenarios";
 
@@ -11,9 +11,10 @@ interface RunComposerProps {
 export function RunComposer({ scenarios }: RunComposerProps) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
-  const [scenarioId, setScenarioId] = useState<DemoScenarioId>(scenarios[0]?.id ?? "saucedemo");
+  const initialScenario = scenarios[0];
+  const [scenarioId, setScenarioId] = useState<DemoScenarioId>(initialScenario?.id ?? "saucedemo");
   const [agentCount, setAgentCount] = useState(12);
-  const [maxSteps, setMaxSteps] = useState(5);
+  const [maxSteps, setMaxSteps] = useState(initialScenario?.recommendedMaxSteps ?? 6);
   const [goal, setGoal] = useState("");
   const [error, setError] = useState<string | null>(null);
 
@@ -21,6 +22,14 @@ export function RunComposer({ scenarios }: RunComposerProps) {
     () => scenarios.find((scenario) => scenario.id === scenarioId) ?? scenarios[0],
     [scenarioId, scenarios],
   );
+
+  useEffect(() => {
+    if (!selectedScenario) {
+      return;
+    }
+
+    setMaxSteps(selectedScenario.recommendedMaxSteps);
+  }, [selectedScenario]);
 
   async function launchRun() {
     setError(null);
@@ -130,12 +139,16 @@ export function RunComposer({ scenarios }: RunComposerProps) {
             <input
               className="mt-2 w-full accent-[var(--accent)]"
               type="range"
-              min={4}
-              max={8}
+              min={selectedScenario.minimumMaxSteps}
+              max={10}
               step={1}
               value={maxSteps}
               onChange={(event) => setMaxSteps(Number(event.target.value))}
             />
+            <p className="mt-2 text-xs leading-6 text-[var(--muted)]">
+              Recommended {selectedScenario.recommendedMaxSteps} steps. This scenario enforces a floor of{" "}
+              {selectedScenario.minimumMaxSteps} so the swarm can reach a meaningful end state.
+            </p>
           </label>
         </div>
 

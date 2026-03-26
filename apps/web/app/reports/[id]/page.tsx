@@ -141,9 +141,12 @@ export default async function ReportPage({ params }: ReportPageProps) {
               </div>
             ) : (
               report.failureClusters.map((cluster) => (
-                <div key={cluster.label} className="rounded-[1.4rem] border border-[var(--line)] bg-white/60 p-4">
+                <div key={cluster.signature} className="rounded-[1.4rem] border border-[var(--line)] bg-white/60 p-4">
                   <div className="flex items-center justify-between gap-4">
-                    <h3 className="font-semibold">{cluster.label}</h3>
+                    <div>
+                      <h3 className="font-semibold">{cluster.label}</h3>
+                      <p className="mt-1 font-mono text-xs text-[var(--muted)]">{cluster.signature}</p>
+                    </div>
                     <span className="font-mono text-sm text-[var(--muted)]">{cluster.count}</span>
                   </div>
                   <p className="mt-2 text-sm leading-7 text-[var(--muted)]">{cluster.reasons.join("; ")}</p>
