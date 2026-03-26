@@ -35,6 +35,13 @@ function latestStep(run: AgentRunResultLike) {
 
 const BLOCKED_PATTERN = /robot or human|captcha|access denied|verify you are human|blocked|cloudflare|invalid ssl certificate|attention required/i;
 const TIMEOUT_PATTERN = /timeout|timed out|page\.goto|waitforurl|waiting until/i;
+const INTERSTITIAL_PATTERN = /google_vignette|interstitial|overlay/i;
+
+interface FailureClassification {
+  signature: string;
+  label: string;
+  operational: boolean;
+}
 
 function normalizeToken(value: string) {
   return value
@@ -44,7 +51,7 @@ function normalizeToken(value: string) {
     .slice(0, 48);
 }
 
-function classifyFailure(run: AgentRunResultLike) {
+function classifyFailure(run: AgentRunResultLike): FailureClassification {
   const last = latestStep(run);
   const errorBlob = [last?.action.details, last?.observation.summary, ...run.finalPage.errorFlags]
     .filter(Boolean)
@@ -54,6 +61,7 @@ function classifyFailure(run: AgentRunResultLike) {
     return {
       signature: "unstarted",
       label: "Run never started",
+      operational: true,
     };
   }
 
@@ -61,6 +69,7 @@ function classifyFailure(run: AgentRunResultLike) {
     return {
       signature: `budget_exhausted_after_${last.action.kind}`,
       label: "Step budget exhausted before completion",
+      operational: false,
     };
   }
 
@@ -68,13 +77,23 @@ function classifyFailure(run: AgentRunResultLike) {
     return {
       signature: "environment_blocked",
       label: "Site or environment blocked execution",
+      operational: true,
     };
   }
 
   if (TIMEOUT_PATTERN.test(errorBlob)) {
+    const interruptedByInterstitial =
+      INTERSTITIAL_PATTERN.test(errorBlob) ||
+      INTERSTITIAL_PATTERN.test(last.observation.page.url);
+
     return {
-      signature: `navigation_timeout_after_${last.decision.kind}`,
-      label: "Navigation or page-load timeout",
+      signature: interruptedByInterstitial
+        ? "runner_interstitial_timeout"
+        : `runner_navigation_timeout_after_${last.decision.kind}`,
+      label: interruptedByInterstitial
+        ? "Interstitial or ad overlay interrupted execution"
+        : "Execution runner timed out during navigation",
+      operational: true,
     };
   }
 
@@ -83,24 +102,33 @@ function classifyFailure(run: AgentRunResultLike) {
     return {
       signature: `runner_error_${normalizeToken(topFlag || "unknown")}`,
       label: "Execution runner error",
+      operational: true,
     };
   }
 
   return {
     signature: `incomplete_after_${last.decision.kind}_${last.action.kind}_${run.finalPage.loadState}`,
     label: `Incomplete after ${last.action.kind}`,
+    operational: false,
   };
 }
 
 function computeEfiComponents(agentRuns: AgentRunResultLike[]): EfiComponent[] {
-  const frustrations = agentRuns.map((run) => latestStep(run)?.frustration ?? 0);
-  const failures = agentRuns.map((run) => (run.failed ? 1 : 0));
-  const drag = agentRuns.map((run) => run.steps.length / Math.max(run.config.maxSteps, 1));
-  const errorPressure = agentRuns.map((run) =>
-    run.steps.reduce(
-      (count, step) => count + (step.observation.page.errorFlags.length > 0 ? 1 : 0),
-      0,
-    ) / Math.max(run.steps.length, 1),
+  const classifications = agentRuns.map((run) => classifyFailure(run));
+  const frustrations = agentRuns.map((run, index) =>
+    classifications[index].operational ? 0 : latestStep(run)?.frustration ?? 0,
+  );
+  const failures = agentRuns.map((run, index) => (run.failed && !classifications[index].operational ? 1 : 0));
+  const drag = agentRuns.map((run, index) =>
+    classifications[index].operational ? 0 : run.steps.length / Math.max(run.config.maxSteps, 1),
+  );
+  const errorPressure = agentRuns.map((run, index) =>
+    classifications[index].operational
+      ? 0
+      : run.steps.reduce(
+          (count, step) => count + (step.observation.page.errorFlags.length > 0 ? 1 : 0),
+          0,
+        ) / Math.max(run.steps.length, 1),
   );
 
   const components: EfiComponent[] = [
@@ -135,6 +163,24 @@ function computeEfiComponents(agentRuns: AgentRunResultLike[]): EfiComponent[] {
   }
 
   return components;
+}
+
+function buildExecutionValiditySection(report: ReportDocument) {
+  const operationalClusters = report.failureClusters.filter((cluster) =>
+    cluster.signature === "environment_blocked" || cluster.signature.startsWith("runner_") || cluster.signature === "unstarted",
+  );
+
+  if (operationalClusters.length === 0) {
+    return null;
+  }
+
+  const totalOperational = operationalClusters.reduce((sum, cluster) => sum + cluster.count, 0);
+  return {
+    heading: "Execution Validity",
+    body: `${totalOperational} run(s) were classified as runner or environment failures and discounted from the UX EFI score: ${operationalClusters
+      .map((cluster) => `${cluster.label} [${cluster.signature}] x${cluster.count}`)
+      .join("; ")}.`,
+  } satisfies ReportSection;
 }
 
 export function computeEfi(agentRuns: AgentRunResultLike[]): EfiBreakdown {
@@ -214,11 +260,14 @@ function buildHeatmap(agentRuns: AgentRunResultLike[]): HeatmapPoint[] {
 }
 
 function buildSections(report: ReportDocument): ReportSection[] {
+  const executionValidity = buildExecutionValiditySection(report);
+
   return [
     {
       heading: "Summary",
       body: report.summary,
     },
+    ...(executionValidity ? [executionValidity] : []),
     {
       heading: "EFI",
       body: `Overall friction index: ${report.efi.score}. Components: ${report.efi.components
@@ -235,8 +284,9 @@ function buildSections(report: ReportDocument): ReportSection[] {
     },
     {
       heading: "Recommendations",
-      body:
-        "Reduce loading delays, clarify the primary CTA, and lower visual noise in the first interaction frame.",
+      body: executionValidity
+        ? "Stabilize the affected scenario runtime first, then interpret the remaining EFI as UX signal. After runner issues are removed, reduce loading delays, clarify the primary CTA, and lower visual noise in the first interaction frame."
+        : "Reduce loading delays, clarify the primary CTA, and lower visual noise in the first interaction frame.",
     },
   ];
 }

@@ -194,6 +194,93 @@ async function gotoWithRetry(page: Page, url: string, options: Parameters<Page["
   throw lastError instanceof Error ? lastError : new Error(String(lastError));
 }
 
+async function resolveFirstHref(page: Page, candidates: Array<() => Locator>) {
+  for (const buildLocator of candidates) {
+    const locator = buildLocator().first();
+
+    try {
+      if ((await locator.count()) === 0) {
+        continue;
+      }
+
+      const href = await locator.getAttribute("href");
+
+      if (href) {
+        return new URL(href, page.url()).toString();
+      }
+    } catch {
+      // Ignore noisy locator reads and continue to the next candidate.
+    }
+  }
+
+  return undefined;
+}
+
+interface SurfaceWaitOptions {
+  label: string;
+  timeout?: number;
+  urlPattern?: RegExp;
+  locatorBuilders?: Array<() => Locator>;
+}
+
+async function waitForSurface(page: Page, options: SurfaceWaitOptions) {
+  const timeout = options.timeout ?? 12_000;
+  const startedAt = Date.now();
+
+  while (Date.now() - startedAt < timeout) {
+    await assertUsableSurface(page);
+
+    if (options.urlPattern?.test(page.url())) {
+      return;
+    }
+
+    for (const buildLocator of options.locatorBuilders ?? []) {
+      const locator = buildLocator().first();
+
+      try {
+        if ((await locator.count()) === 0) {
+          continue;
+        }
+
+        if (await locator.isVisible().catch(() => false)) {
+          return;
+        }
+      } catch {
+        // Ignore transient locator failures while polling for the next surface.
+      }
+    }
+
+    await sleep(250);
+  }
+
+  const title = await page.title().catch(() => "");
+  const suffix = title ? ` (${title})` : "";
+  throw new Error(`Timed out waiting for ${options.label} at ${page.url()}${suffix}`);
+}
+
+async function clickThenConfirmSurface(
+  page: Page,
+  label: string,
+  candidates: Array<() => Locator>,
+  confirmation: SurfaceWaitOptions & { fallbackUrl?: string },
+) {
+  await clickWithFallback(page, label, candidates);
+
+  try {
+    await waitForSurface(page, confirmation);
+  } catch (error) {
+    if (!confirmation.fallbackUrl) {
+      throw error;
+    }
+
+    await gotoWithRetry(page, confirmation.fallbackUrl, {
+      waitUntil: "domcontentloaded",
+      timeout: confirmation.timeout ?? 15_000,
+    });
+    await waitForSurface(page, confirmation);
+  }
+}
+
 async function snapshotPage(page: Page, fallbackUrl: string, explicitFlags: string[] = []): Promise<PageState> {
   const url = page.url() || fallbackUrl;
   const title = await page.title().catch(() => undefined);
@@ -619,7 +706,15 @@ async function runAutomationExerciseFlow(
     () => page.locator("#submit_search"),
     () => page.getByRole("button", { name: /search/i }),
   ]);
-  await page.waitForURL(/products\?search=/, { timeout: 15_000 });
+  await waitForSurface(page, {
+    label: "filtered Automation Exercise search results",
+    timeout: 15_000,
+    urlPattern: /products\?search=/,
+    locatorBuilders: [
+      () => page.locator("a[href='/product_details/1']"),
+      () => page.getByRole("link", { name: /View Product/i }),
+    ],
+  });
   await sleep(paceMs(input.persona, "click"));
 
   await appendStep(
@@ -650,11 +745,22 @@ async function runAutomationExerciseFlow(
     return;
   }
 
-  await clickWithFallback(page, "View Product", [
+  const productLinkCandidates = [
     () => page.locator("a[href='/product_details/1']"),
     () => page.getByRole("link", { name: /View Product/i }),
-  ]);
-  await page.waitForURL(/product_details\//, { timeout: 15_000 });
+  ];
+  const productDetailUrl = await resolveFirstHref(page, productLinkCandidates);
+
+  await clickThenConfirmSurface(page, "View Product", productLinkCandidates, {
+    label: "Automation Exercise product detail",
+    timeout: 15_000,
+    urlPattern: /product_details\//,
+    locatorBuilders: [
+      () => page.getByRole("button", { name: /add to cart/i }),
+      () => page.locator("button.cart"),
+    ],
+    fallbackUrl: productDetailUrl,
+  });
   await sleep(paceMs(input.persona, "click"));
 
   await appendStep(
@@ -688,7 +794,16 @@ async function runAutomationExerciseFlow(
     () => page.getByRole("button", { name: /add to cart/i }),
     () => page.locator("button.cart"),
   ]);
-  await page.locator("#cartModal").waitFor({ timeout: 10_000 }).catch(() => undefined);
+  await waitForSurface(page, {
+    label: "Automation Exercise cart intent",
+    timeout: 10_000,
+    urlPattern: /view_cart/,
+    locatorBuilders: [
+      () => page.locator("#cartModal"),
+      () => page.locator("a[href='/view_cart']").filter({ hasText: /View Cart/i }),
+      () => page.getByRole("link", { name: /view cart/i }),
+    ],
+  }).catch(() => undefined);
   await sleep(paceMs(input.persona, "click"));
 
   await appendStep(
@@ -716,18 +831,19 @@ async function runAutomationExerciseFlow(
     return;
   }
 
-  await clickWithFallback(page, "View Cart", [
+  await clickThenConfirmSurface(page, "View Cart", [
     () => page.locator("a[href='/view_cart']").filter({ hasText: /View Cart/i }),
     () => page.getByRole("link", { name: /view cart/i }),
-  ]).catch(async () => {
-    await gotoWithRetry(page, "https://automationexercise.com/view_cart", {
-      waitUntil: "domcontentloaded",
-      timeout: 15_000,
-    });
-
-    return { method: "navigation" as const, target: "cart review" };
+  ], {
+    label: "Automation Exercise cart review",
+    timeout: 15_000,
+    urlPattern: /view_cart/,
+    locatorBuilders: [
+      () => page.getByRole("link", { name: /proceed to checkout/i }),
+      () => page.locator(".cart_info"),
+    ],
+    fallbackUrl: "https://automationexercise.com/view_cart",
   });
-  await page.waitForURL(/view_cart/, { timeout: 15_000 }).catch(() => undefined);
   await sleep(paceMs(input.persona, "click"));
 
   await appendStep(
