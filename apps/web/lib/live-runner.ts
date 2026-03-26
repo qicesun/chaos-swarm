@@ -11,6 +11,8 @@ import type {
 } from "@chaos-swarm/agent-core";
 import type { DemoScenarioDefinition } from "./scenarios";
 
+const BLOCKED_SURFACE_PATTERN = /invalid ssl certificate|attention required|cloudflare|robot or human|access denied|verify you are human|automated access/i;
+
 interface LiveSwarmCallbacks {
   onAgentStart?: (run: AgentRunResult) => Promise<void> | void;
   onAgentStep?: (run: AgentRunResult, step: AgentStepRecord) => Promise<void> | void;
@@ -139,7 +141,7 @@ async function extractErrorFlags(page: Page, extra: string[] = []): Promise<stri
   const flags = new Set(extra);
   const title = await page.title().catch(() => "");
 
-  if (/invalid ssl certificate|attention required|cloudflare/i.test(title)) {
+  if (BLOCKED_SURFACE_PATTERN.test(title)) {
     flags.add(title);
   }
 
@@ -165,9 +167,10 @@ async function extractErrorFlags(page: Page, extra: string[] = []): Promise<stri
 
 async function assertUsableSurface(page: Page) {
   const title = await page.title().catch(() => "");
+  const body = ((await page.textContent("body").catch(() => "")) ?? "").slice(0, 4000);
 
-  if (/invalid ssl certificate|attention required|cloudflare/i.test(title)) {
-    throw new Error(title);
+  if (BLOCKED_SURFACE_PATTERN.test(`${title} ${body}`)) {
+    throw new Error(title || "Blocked or challenge page detected.");
   }
 }
 
@@ -780,6 +783,175 @@ async function runMagentoFlow(
   );
 }
 
+async function waitForWalmartResults(page: Page) {
+  await page.locator("a[href*='/ip/']").first().waitFor({ timeout: 10_000 });
+}
+
+async function waitForWalmartProduct(page: Page) {
+  await page.locator("[data-automation-id='atc'], button:has-text('Add to cart')").first().waitFor({ timeout: 12_000 });
+}
+
+async function runWalmartFlow(
+  page: Page,
+  input: AgentRunInput,
+  startedAt: string,
+  agentId: string,
+  steps: AgentStepRecord[],
+  state: { frustration: number; confidence: number },
+  callbacks: LiveSwarmCallbacks,
+) {
+  await page.goto(input.config.targetUrl, { waitUntil: "domcontentloaded", timeout: 20_000 });
+  await sleep(paceMs(input.persona, "load"));
+
+  await appendStep(
+    page,
+    input,
+    startedAt,
+    agentId,
+    steps,
+    state,
+    {
+      kind: "wait",
+      rationale: "the agent waits for the Walmart landing surface to settle",
+    },
+    {
+      kind: "wait",
+      ok: true,
+      details: "loaded the Walmart home page",
+    },
+    "search entry is visible",
+    callbacks,
+  );
+
+  await assertUsableSurface(page);
+  await maybeScan(page, input, startedAt, agentId, steps, state, callbacks, "paused to scan the retail header chrome");
+
+  if (steps.length >= input.config.maxSteps) {
+    return;
+  }
+
+  const searchBox = page.locator("input[type='search'], input[aria-label*='Search']").first();
+  await searchBox.fill("laptop");
+  await sleep(paceMs(input.persona, "type"));
+  await searchBox.press("Enter");
+  const searchNavigation = await page
+    .waitForURL(/walmart\.com\/search/, { timeout: 4_000 })
+    .then(() => "submitted")
+    .catch(async () => {
+      await page.goto("https://www.walmart.com/search?q=laptop", {
+        waitUntil: "domcontentloaded",
+        timeout: 15_000,
+      });
+
+      return "fallback";
+    });
+  await waitForWalmartResults(page);
+  await sleep(paceMs(input.persona, "click"));
+
+  await appendStep(
+    page,
+    input,
+    startedAt,
+    agentId,
+    steps,
+    state,
+    {
+      kind: "type",
+      rationale: "the retail header search is the fastest route into Walmart assortment",
+      target: "search",
+      value: "laptop",
+    },
+    {
+      kind: "type",
+      ok: true,
+      details:
+        searchNavigation === "submitted"
+          ? "searched Walmart for laptop inventory from the retail header"
+          : "search submit stalled, so the agent recovered by navigating directly to the results URL",
+    },
+    "results grid is visible",
+    callbacks,
+  );
+
+  await assertUsableSurface(page);
+
+  if (steps.length >= input.config.maxSteps) {
+    return;
+  }
+
+  await clickWithFallback(page, "first product", [
+    () => page.locator("a[href*='/ip/']"),
+    () => page.locator("[data-automation-id='product-title']").locator("a"),
+  ]);
+  await waitForWalmartProduct(page);
+  await sleep(paceMs(input.persona, "click"));
+
+  await appendStep(
+    page,
+    input,
+    startedAt,
+    agentId,
+    steps,
+    state,
+    {
+      kind: "click",
+      rationale: "the agent drills into the first visible product card from the results grid",
+      target: "first Walmart result",
+    },
+    {
+      kind: "click",
+      ok: true,
+      details: "opened a Walmart product detail page",
+    },
+    "product detail is visible",
+    callbacks,
+  );
+
+  await assertUsableSurface(page);
+
+  if (steps.length >= input.config.maxSteps) {
+    return;
+  }
+
+  await clickWithFallback(page, "Add to cart", [
+    () => page.locator("[data-automation-id='atc']"),
+    () => page.getByRole("button", { name: /^add to cart$/i }),
+    () => page.getByRole("button", { name: /add to cart/i }),
+  ]);
+  await sleep(paceMs(input.persona, "click") + 800);
+
+  if (input.persona.archetype === "ChaosAgent") {
+    await page.locator("[data-automation-id='atc']").first().click({ timeout: 2_000 }).catch(() => undefined);
+  }
+
+  await appendStep(
+    page,
+    input,
+    startedAt,
+    agentId,
+    steps,
+    state,
+    {
+      kind: input.persona.archetype === "ChaosAgent" ? "retry" : "click",
+      rationale:
+        input.persona.archetype === "ChaosAgent"
+          ? "chaos agents may hammer the CTA when cart feedback is delayed"
+          : "the primary CTA pushes the chosen Walmart item toward cart intent",
+      target: "Add to cart",
+    },
+    {
+      kind: input.persona.archetype === "ChaosAgent" ? "retry" : "click",
+      ok: true,
+      details:
+        input.persona.archetype === "ChaosAgent"
+          ? "re-triggered Walmart add-to-cart after a short feedback delay"
+          : "sent the Walmart product into cart intent",
+    },
+    "cart intent feedback has been exercised",
+    callbacks,
+  );
+}
+
 async function runLiveAgent(
   browser: Browser,
   scenario: DemoScenarioDefinition,
@@ -813,15 +985,26 @@ async function runLiveAgent(
   try {
     if (scenario.id === "saucedemo") {
       await runSaucedemoFlow(page, input, startedAt, agentId, steps, state, callbacks);
-    } else {
+    } else if (scenario.id === "magento") {
       await runMagentoFlow(page, input, startedAt, agentId, steps, state, callbacks);
+    } else {
+      await runWalmartFlow(page, input, startedAt, agentId, steps, state, callbacks);
     }
 
     finalPage = await snapshotPage(page, input.config.targetUrl);
     const completed =
       scenario.id === "saucedemo"
         ? /cart/.test(finalPage.url)
-        : /checkout\/cart/.test(finalPage.url) || finalPage.visibleTargets.some((target) => /checkout/i.test(target));
+        : scenario.id === "magento"
+          ? /checkout\/cart/.test(finalPage.url) || finalPage.visibleTargets.some((target) => /checkout/i.test(target))
+          : /walmart\.com\/cart/.test(finalPage.url) ||
+            finalPage.visibleTargets.some((target) => /check out|continue to cart|cart contains/i.test(target)) ||
+            steps.some(
+              (step) =>
+                step.decision.target === "Add to cart" &&
+                step.action.ok &&
+                !step.observation.page.errorFlags.some((flag) => BLOCKED_SURFACE_PATTERN.test(flag)),
+            );
 
     return buildRunningSnapshot(
       input,

@@ -14,7 +14,7 @@ const createRunSchema = z.object({
   goal: z.string().min(3).optional(),
   agentCount: z.number().int().min(1).max(32).default(12),
   maxSteps: z.number().int().min(2).max(12).default(5),
-  demoScenario: z.enum(["saucedemo", "magento"]).default("saucedemo"),
+  demoScenario: z.enum(["saucedemo", "magento", "walmart"]).default("saucedemo"),
 });
 
 const activeJobs = new Map<string, Promise<void>>();
@@ -104,6 +104,24 @@ function stageMatched(run: AgentRunResult, scenario: DemoScenarioDefinition, sta
 
       if (stage.id === "confirmation") {
         return /checkout\/cart/.test(stepUrl);
+      }
+    }
+
+    if (scenario.id === "walmart") {
+      if (stage.id === "search") {
+        return step.step === 0 || /walmart\.com\/?$/.test(stepUrl);
+      }
+
+      if (stage.id === "results") {
+        return /walmart\.com\/search/.test(stepUrl);
+      }
+
+      if (stage.id === "product") {
+        return /walmart\.com\/ip\//.test(stepUrl);
+      }
+
+      if (stage.id === "cart-intent") {
+        return /walmart\.com\/cart/.test(stepUrl) || /check out|cart contains/i.test(step.observation.summary);
       }
     }
 

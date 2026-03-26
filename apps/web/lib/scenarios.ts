@@ -1,4 +1,4 @@
-export type DemoScenarioId = "saucedemo" | "magento";
+export type DemoScenarioId = "saucedemo" | "magento" | "walmart";
 
 export interface DemoScenarioFrame {
   id: string;
@@ -88,6 +88,45 @@ export const scenarioCatalog: Record<DemoScenarioId, DemoScenarioDefinition> = {
       },
     ],
   },
+  walmart: {
+    id: "walmart",
+    name: "Walmart search-to-cart probe",
+    siteLabel: "Walmart",
+    targetUrl: "https://www.walmart.com/",
+    goal: "Search for a laptop, open a product, and try to add it to cart.",
+    description:
+      "Real US retail surface with live anti-bot pressure, dense merchandising, and variable cart feedback.",
+    frames: [
+      {
+        id: "search",
+        label: "Search entry",
+        url: "https://www.walmart.com/",
+        targets: ["Search", "Departments", "Sign in", "Pickup or delivery"],
+        errorBias: 0.16,
+      },
+      {
+        id: "results",
+        label: "Results grid",
+        url: "https://www.walmart.com/search",
+        targets: ["Product tile", "Add", "Filter", "Sort"],
+        errorBias: 0.28,
+      },
+      {
+        id: "product",
+        label: "Product detail",
+        url: "https://www.walmart.com/ip/",
+        targets: ["Add to cart", "Buy now", "Pickup", "Shipping"],
+        errorBias: 0.34,
+      },
+      {
+        id: "cart-intent",
+        label: "Cart intent",
+        url: "https://www.walmart.com/cart",
+        targets: ["Check out", "Cart", "Continue shopping"],
+        errorBias: 0.14,
+      },
+    ],
+  },
 };
 
 export function listScenarios() {
@@ -97,4 +136,3 @@ export function listScenarios() {
 export function getScenario(id: DemoScenarioId) {
   return scenarioCatalog[id];
 }
-
