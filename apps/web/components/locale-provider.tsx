@@ -5,6 +5,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
@@ -27,17 +28,22 @@ export function LocaleProvider({
   initialLocale: Locale;
 }) {
   const [locale, setLocaleState] = useState<Locale>(initialLocale);
+  const hydratedPreference = useRef(false);
 
   function setLocale(nextLocale: Locale) {
     setLocaleState(nextLocale);
   }
 
   useEffect(() => {
-    const storedLocale = window.localStorage.getItem(STORAGE_KEY);
+    if (!hydratedPreference.current) {
+      hydratedPreference.current = true;
 
-    if ((storedLocale === "en" || storedLocale === "zh") && storedLocale !== locale) {
-      const timer = window.setTimeout(() => setLocaleState(storedLocale), 0);
-      return () => window.clearTimeout(timer);
+      const storedLocale = window.localStorage.getItem(STORAGE_KEY);
+
+      if ((storedLocale === "en" || storedLocale === "zh") && storedLocale !== locale) {
+        const timer = window.setTimeout(() => setLocaleState(storedLocale), 0);
+        return () => window.clearTimeout(timer);
+      }
     }
 
     document.documentElement.lang = locale;
