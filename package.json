@@ -1,0 +1,24 @@
+{
+  "name": "chaos-swarm",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@10.33.0",
+  "scripts": {
+    "dev": "pnpm --filter @chaos-swarm/agent-core build && pnpm --filter @chaos-swarm/reporting build && pnpm --filter @chaos-swarm/web dev",
+    "dev:web": "pnpm --filter @chaos-swarm/agent-core build && pnpm --filter @chaos-swarm/reporting build && pnpm --filter @chaos-swarm/web dev",
+    "dev:trigger": "trigger.dev dev",
+    "build": "pnpm -r build",
+    "lint": "pnpm --filter @chaos-swarm/web lint && pnpm --filter @chaos-swarm/agent-core typecheck && pnpm --filter @chaos-swarm/reporting typecheck",
+    "typecheck": "pnpm --filter @chaos-swarm/web exec tsc --noEmit && pnpm --filter @chaos-swarm/agent-core typecheck && pnpm --filter @chaos-swarm/reporting typecheck",
+    "keys:import": "node ./scripts/import-keys.mjs"
+  },
+  "devDependencies": {
+    "@trigger.dev/build": "4.4.3",
+    "trigger.dev": "4.4.3",
+    "typescript": "^5.9.3",
+    "zod": "4.3.6"
+  },
+  "dependencies": {
+    "@trigger.dev/sdk": "4.4.3"
+  }
+}

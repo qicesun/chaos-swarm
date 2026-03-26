@@ -1,0 +1,11 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "@chaos-swarm/agent-core": ["./packages/agent-core/src/index.ts"],
+      "@chaos-swarm/reporting": ["./packages/reporting/src/index.ts"]
+    }
+  },
+  "include": ["trigger/**/*.ts", "trigger.config.ts"]
+}

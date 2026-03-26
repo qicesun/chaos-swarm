@@ -1,0 +1,95 @@
+@import "tailwindcss";
+
+:root {
+  --background: #f4efe5;
+  --foreground: #171412;
+  --muted: #7c6f63;
+  --panel: rgba(255, 250, 242, 0.78);
+  --panel-strong: rgba(255, 245, 233, 0.92);
+  --line: rgba(73, 52, 39, 0.14);
+  --accent: #c84c26;
+  --accent-soft: #f3aa7c;
+  --danger: #b52917;
+  --success: #206d47;
+  --shadow: 0 24px 80px rgba(106, 68, 41, 0.16);
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-display);
+  --font-mono: var(--font-mono);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  background:
+    radial-gradient(circle at top left, rgba(246, 176, 124, 0.35), transparent 28%),
+    radial-gradient(circle at 88% 12%, rgba(196, 91, 62, 0.12), transparent 22%),
+    linear-gradient(180deg, #f9f4ea 0%, #efe6d7 48%, #ede0d0 100%);
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-display), sans-serif;
+  min-height: 100vh;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+.grain {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.25;
+  background-image:
+    linear-gradient(transparent 0, rgba(255, 255, 255, 0.4) 50%, transparent 100%),
+    radial-gradient(circle, rgba(72, 51, 36, 0.05) 0.6px, transparent 0.6px);
+  background-size:
+    100% 100%,
+    16px 16px;
+  mix-blend-mode: multiply;
+}
+
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(10px);
+}
+
+.panel-strong {
+  background: var(--panel-strong);
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(10px);
+}
+
+.metric-value {
+  font-feature-settings: "tnum";
+  font-variant-numeric: tabular-nums;
+}
+
+.heat-dot {
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  border-radius: 999px;
+  transform: translate(-50%, -50%);
+  background: rgba(200, 76, 38, 0.78);
+  box-shadow: 0 0 24px rgba(200, 76, 38, 0.58);
+}
