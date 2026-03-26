@@ -14,6 +14,7 @@ const createRunSchema = z.object({
   goal: z.string().min(3).optional(),
   agentCount: z.number().int().min(1).max(32).default(12),
   maxSteps: z.number().int().min(2).max(12).default(5),
+  strictVisualMode: z.boolean().default(false),
   demoScenario: z
     .enum(["saucedemo", "automationexercise", "theinternet", "expandtesting", "parabank"])
     .default("saucedemo"),
@@ -179,6 +180,8 @@ function toTimeline(agentRuns: AgentRunResult[], scenario: DemoScenarioDefinitio
           note: step.observation.summary,
           frustration: round(step.frustration * 100),
           confidence: round(step.confidence * 100),
+          executionAssistMode: step.action.execution?.mode ?? "none",
+          domAssisted: step.action.execution?.domAssisted ?? false,
         };
       });
     })
@@ -357,7 +360,7 @@ function buildSummary(agentRuns: AgentRunResult[]) {
   };
 }
 
-function buildWarnings() {
+function buildWarnings(strictVisualMode: boolean) {
   const warnings: string[] = [];
 
   if (env.openAiApiKey) {
@@ -372,6 +375,12 @@ function buildWarnings() {
     warnings.push("Local Playwright execution is active on this workstation; Browserbase fan-out is not enabled yet.");
   }
 
+  if (strictVisualMode) {
+    warnings.push("Strict visual mode is enabled: click and fill actions will not fall back to DOM locators.");
+  } else {
+    warnings.push("Hybrid visual mode is enabled: coordinate-first execution can fall back to DOM locators when needed.");
+  }
+
   if (!env.supabaseServiceRoleKey || !env.supabaseUrl) {
     warnings.push("Supabase persistence is disabled.");
   }
@@ -379,7 +388,12 @@ function buildWarnings() {
   return warnings;
 }
 
-function createPlaceholderReport(targetUrl: string, goal: string, agentCount: number): ReportDocument {
+function createPlaceholderReport(
+  targetUrl: string,
+  goal: string,
+  agentCount: number,
+  strictVisualMode: boolean,
+): ReportDocument {
   return {
     title: `Chaos Swarm report for ${goal}`,
     summary: `Run in progress against ${targetUrl}. Waiting for agent telemetry before rendering the final report.`,
@@ -398,10 +412,20 @@ function createPlaceholderReport(targetUrl: string, goal: string, agentCount: nu
     failureClusters: [],
     highlightReel: [],
     heatmap: [],
+    executionQuality: {
+      strictVisualMode,
+      totalInteractionActions: 0,
+      visualOnlyActions: 0,
+      domAssistedActions: 0,
+      domOnlyActions: 0,
+      visualPurity: 100,
+      domAssistRate: 0,
+    },
     metadata: {
       targetUrl,
       goal,
       agentCount,
+      strictVisualMode,
       pending: true,
     },
   };
@@ -457,6 +481,7 @@ async function executeRun(record: RunRecord, scenario: DemoScenarioDefinition, p
       targetUrl: record.targetUrl,
       goal: record.goal,
       maxSteps,
+      strictVisualMode: record.strictVisualMode,
       personas,
       onAgentStart(run) {
         upsertAgentRun(record, scenario, run);
@@ -509,6 +534,7 @@ export async function createRun(input: unknown) {
     targetUrl: payload.targetUrl ?? scenario.targetUrl,
     goal: payload.goal ?? scenario.goal,
     agentCount: payload.agentCount,
+    strictVisualMode: payload.strictVisualMode,
     storageMode: env.storageMode,
     executionMode: env.executionMode,
     summary: {
@@ -521,8 +547,13 @@ export async function createRun(input: unknown) {
     stageSummary: scenario.frames.map((frame) => ({ label: frame.label, reached: 0, stuck: 0 })),
     agentRuns: [],
     events: [],
-    report: createPlaceholderReport(payload.targetUrl ?? scenario.targetUrl, payload.goal ?? scenario.goal, payload.agentCount),
-    warnings: buildWarnings(),
+    report: createPlaceholderReport(
+      payload.targetUrl ?? scenario.targetUrl,
+      payload.goal ?? scenario.goal,
+      payload.agentCount,
+      payload.strictVisualMode,
+    ),
+    warnings: buildWarnings(payload.strictVisualMode),
   };
 
   if (maxSteps !== payload.maxSteps) {

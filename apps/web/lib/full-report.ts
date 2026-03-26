@@ -14,6 +14,7 @@ export interface PortableRunReport {
     targetUrl: string;
     goal: string;
     agentCount: number;
+    strictVisualMode: boolean;
     storageMode: RunRecord["storageMode"];
     executionMode: RunRecord["executionMode"];
     warnings: string[];
@@ -43,6 +44,7 @@ function eventLine(event: RunRecord["events"][number]) {
     `stage=${event.stageLabel ?? "unclassified"}`,
     `frustration=${event.frustration}%`,
     `confidence=${event.confidence}%`,
+    `execution=${event.executionAssistMode}`,
     `load=${event.loadState}`,
     `url=${event.url}`,
     `raw=${event.actionCode}`,
@@ -57,6 +59,7 @@ function stepLine(step: RunRecord["agentRuns"][number]["steps"][number]) {
     `ok=${step.action.ok}`,
     `frustration=${formatPercent(Math.round(step.frustration * 10000) / 100)}`,
     `confidence=${formatPercent(Math.round(step.confidence * 10000) / 100)}`,
+    `execution=${step.action.execution?.mode ?? "none"}`,
     `url=${step.observation.page.url}`,
     `summary=${step.observation.summary}`,
   ].join(" | ");
@@ -76,6 +79,7 @@ export function buildPortableRunReport(record: RunRecord): PortableRunReport {
       targetUrl: record.targetUrl,
       goal: record.goal,
       agentCount: record.agentCount,
+      strictVisualMode: record.strictVisualMode,
       storageMode: record.storageMode,
       executionMode: record.executionMode,
       warnings: record.warnings,
@@ -111,6 +115,7 @@ export function renderPortableRunReportMarkdown(record: RunRecord) {
     `- Target URL: ${portable.run.targetUrl}`,
     `- Goal: ${portable.run.goal}`,
     `- Agent Count: ${portable.run.agentCount}`,
+    `- Strict Visual Mode: ${portable.run.strictVisualMode ? "on" : "off"}`,
     `- Storage Mode: ${portable.run.storageMode}`,
     `- Execution Mode: ${portable.run.executionMode}`,
     "",
@@ -119,6 +124,8 @@ export function renderPortableRunReportMarkdown(record: RunRecord) {
     `- Failed Agents: ${portable.run.summary.failed}`,
     `- Average Steps: ${portable.run.summary.averageSteps}`,
     `- Peak Frustration: ${portable.run.summary.peakFrustration}%`,
+    `- Visual Purity: ${portable.report.executionQuality.visualPurity}%`,
+    `- DOM Assist Rate: ${portable.report.executionQuality.domAssistRate}%`,
     "",
     "## Runtime Warnings",
     ...(portable.run.warnings.length > 0 ? portable.run.warnings.map((warning) => `- ${warning}`) : ["- None"]),

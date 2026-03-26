@@ -211,7 +211,8 @@ export function RunMonitor({ initialRun }: RunMonitorProps) {
                           <div className="rounded-[1rem] bg-[rgba(23,20,18,0.04)] px-3 py-3">
                             <p className="text-[11px] uppercase tracking-[0.14em] text-[var(--muted)]">{t("run.technicalState")}</p>
                             <p className="mt-1 text-sm text-[var(--muted)]">
-                              {latestEvent.actionCode} on a {latestEvent.loadState} page
+                              {latestEvent.actionCode} on a {latestEvent.loadState} page ·{" "}
+                              {formatExecutionAssistMode(latestEvent.executionAssistMode, locale)}
                             </p>
                           </div>
                         </div>
@@ -426,7 +427,7 @@ export function RunMonitor({ initialRun }: RunMonitorProps) {
                 <div>
                   <p className="text-sm uppercase tracking-[0.18em] text-[var(--muted)]">{t("run.technicalDetail")}</p>
                   <p className="text-sm leading-7 text-[var(--muted)]">
-                    {event.actionCode} on a {event.loadState} page.
+                    {event.actionCode} on a {event.loadState} page. {formatExecutionAssistMode(event.executionAssistMode, locale)}.
                   </p>
                   <p className="mt-2 break-all text-sm leading-7 text-[var(--muted)]">{event.url}</p>
                 </div>
@@ -472,6 +473,25 @@ function formatPersonaLabel(archetype: "Speedrunner" | "Novice" | "ChaosAgent", 
   }
 
   return locale === "zh" ? "新手型" : archetype;
+}
+
+function formatExecutionAssistMode(
+  mode: RunRecord["events"][number]["executionAssistMode"],
+  locale: "en" | "zh",
+) {
+  if (mode === "visual_only") {
+    return locale === "zh" ? "纯视觉执行" : "visual only";
+  }
+
+  if (mode === "visual_with_dom_assist") {
+    return locale === "zh" ? "视觉执行 + DOM 兜底" : "visual + DOM assist";
+  }
+
+  if (mode === "dom_only") {
+    return locale === "zh" ? "纯 DOM 兜底" : "DOM only";
+  }
+
+  return locale === "zh" ? "无直接交互" : "no direct interaction";
 }
 
 function personaTone(archetype: "Speedrunner" | "Novice" | "ChaosAgent") {

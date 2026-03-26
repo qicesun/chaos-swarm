@@ -2,6 +2,7 @@ import {
   type AgentRunResultLike,
   type EfiBreakdown,
   type EfiComponent,
+  type ExecutionQuality,
   type FailureCluster,
   type FunnelStage,
   type HeatmapPoint,
@@ -36,6 +37,7 @@ function latestStep(run: AgentRunResultLike) {
 const BLOCKED_PATTERN = /robot or human|captcha|access denied|verify you are human|blocked|cloudflare|invalid ssl certificate|attention required/i;
 const TIMEOUT_PATTERN = /timeout|timed out|page\.goto|waitforurl|waiting until/i;
 const INTERSTITIAL_PATTERN = /google_vignette|interstitial|overlay/i;
+const STRICT_VISUAL_PATTERN = /strict visual mode blocked dom fallback/i;
 
 interface FailureClassification {
   signature: string;
@@ -70,6 +72,14 @@ function classifyFailure(run: AgentRunResultLike): FailureClassification {
       signature: `budget_exhausted_after_${last.action.kind}`,
       label: "Step budget exhausted before completion",
       operational: false,
+    };
+  }
+
+  if (STRICT_VISUAL_PATTERN.test(errorBlob)) {
+    return {
+      signature: "strict_visual_execution_limit",
+      label: "Strict visual mode halted execution",
+      operational: true,
     };
   }
 
@@ -183,6 +193,65 @@ function buildExecutionValiditySection(report: ReportDocument) {
   } satisfies ReportSection;
 }
 
+function computeExecutionQuality(agentRuns: AgentRunResultLike[]): ExecutionQuality {
+  let totalInteractionActions = 0;
+  let visualOnlyActions = 0;
+  let domAssistedActions = 0;
+  let domOnlyActions = 0;
+
+  for (const run of agentRuns) {
+    for (const step of run.steps) {
+      const mode =
+        step.action.execution?.mode ??
+        (step.action.kind === "scroll"
+          ? "visual_only"
+          : step.action.kind === "click" || step.action.kind === "type"
+            ? "none"
+            : "none");
+
+      if (mode === "none") {
+        continue;
+      }
+
+      totalInteractionActions += 1;
+
+      if (mode === "visual_only") {
+        visualOnlyActions += 1;
+      }
+
+      if (mode === "visual_with_dom_assist") {
+        domAssistedActions += 1;
+      }
+
+      if (mode === "dom_only") {
+        domOnlyActions += 1;
+      }
+    }
+  }
+
+  const strictVisualMode = agentRuns[0]?.config.strictVisualMode ?? false;
+  return {
+    strictVisualMode,
+    totalInteractionActions,
+    visualOnlyActions,
+    domAssistedActions,
+    domOnlyActions,
+    visualPurity:
+      totalInteractionActions === 0 ? 100 : round((visualOnlyActions / totalInteractionActions) * 100),
+    domAssistRate:
+      totalInteractionActions === 0 ? 0 : round(((domAssistedActions + domOnlyActions) / totalInteractionActions) * 100),
+  };
+}
+
+function buildExecutionPuritySection(report: ReportDocument) {
+  const metrics = report.executionQuality;
+
+  return {
+    heading: "Execution Purity",
+    body: `Strict visual mode: ${metrics.strictVisualMode ? "on" : "off"}. Visual purity ${metrics.visualPurity}%, DOM assist rate ${metrics.domAssistRate}% across ${metrics.totalInteractionActions} interactive action(s). Visual-only=${metrics.visualOnlyActions}, visual+DOM=${metrics.domAssistedActions}, DOM-only=${metrics.domOnlyActions}.`,
+  } satisfies ReportSection;
+}
+
 export function computeEfi(agentRuns: AgentRunResultLike[]): EfiBreakdown {
   const components = computeEfiComponents(agentRuns);
   const score = round(clamp(components.reduce((sum, component) => sum + component.contribution, 0), 0, 100));
@@ -261,12 +330,14 @@ function buildHeatmap(agentRuns: AgentRunResultLike[]): HeatmapPoint[] {
 
 function buildSections(report: ReportDocument): ReportSection[] {
   const executionValidity = buildExecutionValiditySection(report);
+  const executionPurity = buildExecutionPuritySection(report);
 
   return [
     {
       heading: "Summary",
       body: report.summary,
     },
+    executionPurity,
     ...(executionValidity ? [executionValidity] : []),
     {
       heading: "EFI",
@@ -297,6 +368,7 @@ export function buildReport(input: ReportInput): ReportDocument {
   const failureClusters = buildFailureClusters(input.agentRuns);
   const highlightReel = buildHighlightReel(input.agentRuns);
   const heatmap = buildHeatmap(input.agentRuns);
+  const executionQuality = computeExecutionQuality(input.agentRuns);
   const completed = input.agentRuns.filter((run) => run.completed).length;
   const total = input.agentRuns.length;
 
@@ -310,10 +382,12 @@ export function buildReport(input: ReportInput): ReportDocument {
     failureClusters,
     highlightReel,
     heatmap,
+    executionQuality,
     metadata: {
       targetUrl: input.targetUrl,
       goal: input.goal,
       agentCount: total,
+      strictVisualMode: executionQuality.strictVisualMode,
     },
   };
 
@@ -333,6 +407,15 @@ export function renderMarkdown(document: ReportDocument): string {
     `Score: ${document.efi.score}`,
     "",
     ...document.efi.components.map((component) => `- ${component.name}: ${component.score} (${component.weight})`),
+    "",
+    "## Execution Purity",
+    `- Strict visual mode: ${document.executionQuality.strictVisualMode ? "on" : "off"}`,
+    `- Visual purity: ${document.executionQuality.visualPurity}%`,
+    `- DOM assist rate: ${document.executionQuality.domAssistRate}%`,
+    `- Total interactive actions: ${document.executionQuality.totalInteractionActions}`,
+    `- Visual-only actions: ${document.executionQuality.visualOnlyActions}`,
+    `- Visual+DOM actions: ${document.executionQuality.domAssistedActions}`,
+    `- DOM-only actions: ${document.executionQuality.domOnlyActions}`,
     "",
     "## Funnel",
     ...document.funnel.map((stage) => `- ${stage.name}: ${stage.completed}/${stage.total} completed, ${stage.dropped} dropped`),

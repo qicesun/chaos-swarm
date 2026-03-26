@@ -22,6 +22,7 @@ export function RunComposer({ scenarios }: RunComposerProps) {
   const [agentCount, setAgentCount] = useState(12);
   const [maxSteps, setMaxSteps] = useState(initialScenario?.recommendedMaxSteps ?? 6);
   const [goal, setGoal] = useState("");
+  const [strictVisualMode, setStrictVisualMode] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const selectedScenario = useMemo(
@@ -67,6 +68,7 @@ export function RunComposer({ scenarios }: RunComposerProps) {
           demoScenario: scenarioId,
           agentCount,
           maxSteps,
+          strictVisualMode,
           goal: goal.trim() || selectedScenario.goal,
           targetUrl: selectedScenario.targetUrl,
         }),
@@ -182,6 +184,22 @@ export function RunComposer({ scenarios }: RunComposerProps) {
           <h3 className="mt-2 text-lg font-semibold">{t("composer.executionTitle")}</h3>
           <p className="mt-2 text-sm leading-7 text-[var(--muted)]">{t("composer.executionBody")}</p>
         </div>
+
+        <label className="mt-5 flex cursor-pointer items-start gap-4 rounded-[1.5rem] border border-[var(--line)] bg-white/60 p-5">
+          <input
+            type="checkbox"
+            checked={strictVisualMode}
+            onChange={(event) => setStrictVisualMode(event.target.checked)}
+            className="mt-1 h-5 w-5 accent-[var(--accent)]"
+          />
+          <div>
+            <p className="text-sm uppercase tracking-[0.18em] text-[var(--muted)]">{t("composer.strictVisualMode")}</p>
+            <h3 className="mt-2 text-lg font-semibold">
+              {strictVisualMode ? t("composer.strictVisualOn") : t("composer.strictVisualOff")}
+            </h3>
+            <p className="mt-2 text-sm leading-7 text-[var(--muted)]">{t("composer.strictVisualBody")}</p>
+          </div>
+        </label>
 
         {error ? (
           <p className="mt-5 rounded-[1rem] border border-[rgba(181,41,23,0.2)] bg-[rgba(181,41,23,0.08)] px-4 py-3 text-sm text-[var(--danger)]">

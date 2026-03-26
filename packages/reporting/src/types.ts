@@ -37,6 +37,16 @@ export interface ReportSection {
   body: string;
 }
 
+export interface ExecutionQuality {
+  strictVisualMode: boolean;
+  totalInteractionActions: number;
+  visualOnlyActions: number;
+  domAssistedActions: number;
+  domOnlyActions: number;
+  visualPurity: number;
+  domAssistRate: number;
+}
+
 export interface ReportDocument {
   title: string;
   summary: string;
@@ -47,6 +57,7 @@ export interface ReportDocument {
   failureClusters: FailureCluster[];
   highlightReel: string[];
   heatmap: HeatmapPoint[];
+  executionQuality: ExecutionQuality;
   metadata: Record<string, unknown>;
 }
 
@@ -84,6 +95,13 @@ export interface AgentStepRecordLike {
     ok: boolean;
     details: string;
     nextPage?: PageStateLike;
+    execution?: {
+      strictVisualMode: boolean;
+      mode: "visual_only" | "visual_with_dom_assist" | "dom_only" | "none";
+      domAssisted: boolean;
+      visualAttempted: boolean;
+      reason?: string;
+    };
   };
   frustration: number;
   confidence: number;
@@ -97,6 +115,7 @@ export interface AgentRunResultLike {
     targetUrl: string;
     goal: string;
     maxSteps: number;
+    strictVisualMode?: boolean;
   };
   startedAt: string;
   finishedAt: string;

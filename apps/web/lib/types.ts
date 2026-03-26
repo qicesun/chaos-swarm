@@ -21,6 +21,8 @@ export interface TimelineEvent {
   note: string;
   frustration: number;
   confidence: number;
+  executionAssistMode: "visual_only" | "visual_with_dom_assist" | "dom_only" | "none";
+  domAssisted: boolean;
 }
 
 export interface StageSnapshot {
@@ -46,6 +48,7 @@ export interface RunRecord {
   targetUrl: string;
   goal: string;
   agentCount: number;
+  strictVisualMode: boolean;
   storageMode: "memory" | "supabase";
   executionMode: "simulation" | "local" | "hybrid";
   summary: {

@@ -15,6 +15,7 @@ export interface RunConfig {
   maxSteps: number;
   seed?: string;
   demoMode?: boolean;
+  strictVisualMode?: boolean;
 }
 
 export type LoadState = "idle" | "loading" | "interactive" | "complete" | "error";
@@ -43,11 +44,22 @@ export interface Decision {
   value?: string;
 }
 
+export type ExecutionAssistMode = "visual_only" | "visual_with_dom_assist" | "dom_only" | "none";
+
+export interface ActionExecutionAssist {
+  strictVisualMode: boolean;
+  mode: ExecutionAssistMode;
+  domAssisted: boolean;
+  visualAttempted: boolean;
+  reason?: string;
+}
+
 export interface ActionResult {
   kind: DecisionKind;
   ok: boolean;
   details: string;
   nextPage?: PageState;
+  execution?: ActionExecutionAssist;
 }
 
 export interface AgentStepRecord {

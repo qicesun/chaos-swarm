@@ -1,6 +1,7 @@
 import { chromium, type Browser, type Locator, type Page } from "playwright";
 import type {
   ActionResult,
+  ActionExecutionAssist,
   AgentPersona,
   AgentRunInput,
   AgentRunResult,
@@ -30,6 +31,7 @@ interface LiveSwarmOptions extends LiveSwarmCallbacks {
   targetUrl: string;
   goal: string;
   maxSteps: number;
+  strictVisualMode: boolean;
   personas: AgentPersona[];
   runId: string;
 }
@@ -808,7 +810,84 @@ function candidateLikelyNavigates(candidate: InteractiveCandidate) {
   );
 }
 
-async function clickCandidate(page: Page, candidate: InteractiveCandidate) {
+function visualOnlyExecution(
+  strictVisualMode: boolean,
+  reason?: string,
+): ActionExecutionAssist {
+  return {
+    strictVisualMode,
+    mode: "visual_only",
+    domAssisted: false,
+    visualAttempted: true,
+    reason,
+  };
+}
+
+function domAssistExecution(
+  strictVisualMode: boolean,
+  reason?: string,
+  mode: "visual_with_dom_assist" | "dom_only" = "visual_with_dom_assist",
+): ActionExecutionAssist {
+  return {
+    strictVisualMode,
+    mode,
+    domAssisted: true,
+    visualAttempted: mode !== "dom_only",
+    reason,
+  };
+}
+
+function noDirectInteractionExecution(strictVisualMode: boolean): ActionExecutionAssist {
+  return {
+    strictVisualMode,
+    mode: "none",
+    domAssisted: false,
+    visualAttempted: false,
+  };
+}
+
+function mergeExecutionAssists(
+  strictVisualMode: boolean,
+  assists: ActionExecutionAssist[],
+): ActionExecutionAssist {
+  const relevant = assists.filter((assist) => assist.mode !== "none");
+
+  if (relevant.length === 0) {
+    return noDirectInteractionExecution(strictVisualMode);
+  }
+
+  const mergedReason =
+    relevant
+      .map((assist) => assist.reason)
+      .filter(Boolean)
+      .join("; ") || undefined;
+
+  if (relevant.some((assist) => assist.mode === "dom_only")) {
+    return domAssistExecution(strictVisualMode, mergedReason, "dom_only");
+  }
+
+  if (relevant.some((assist) => assist.domAssisted)) {
+    return domAssistExecution(strictVisualMode, mergedReason);
+  }
+
+  return visualOnlyExecution(strictVisualMode, mergedReason);
+}
+
+class ExecutionAttemptError extends Error {
+  execution: ActionExecutionAssist;
+
+  constructor(message: string, execution: ActionExecutionAssist) {
+    super(message);
+    this.name = "ExecutionAttemptError";
+    this.execution = execution;
+  }
+}
+
+async function clickCandidate(
+  page: Page,
+  candidate: InteractiveCandidate,
+  strictVisualMode: boolean,
+) {
   if (candidate.disabled) {
     throw new Error(`Target "${candidate.text}" is disabled.`);
   }
@@ -816,6 +895,7 @@ async function clickCandidate(page: Page, candidate: InteractiveCandidate) {
   const shouldVerify = candidateLikelyNavigates(candidate);
   const beforeUrl = page.url();
   const beforeFingerprint = shouldVerify ? await pageFingerprint(page) : "";
+  let visualFailureReason = `visual click on "${candidate.text}" was not confirmed`;
 
   try {
     await focusCandidateByPoint(page, candidate);
@@ -826,13 +906,22 @@ async function clickCandidate(page: Page, candidate: InteractiveCandidate) {
       page.url() !== beforeUrl ||
       (await pageFingerprint(page)) !== beforeFingerprint
     ) {
-      return;
+      return visualOnlyExecution(strictVisualMode);
     }
-  } catch {
-    // Fall through to DOM fallback.
+    visualFailureReason = `visual click on "${candidate.text}" did not materially change the page`;
+  } catch (error) {
+    visualFailureReason = error instanceof Error ? error.message : String(error);
+  }
+
+  if (strictVisualMode) {
+    throw new ExecutionAttemptError(
+      `Strict visual mode blocked DOM fallback after ${visualFailureReason}.`,
+      visualOnlyExecution(strictVisualMode, visualFailureReason),
+    );
   }
 
   await clickWithFallback(page, candidate.text, candidateLocators(page, candidate));
+  return domAssistExecution(strictVisualMode, visualFailureReason);
 }
 
 async function selectCandidateOption(page: Page, candidate: InteractiveCandidate, value: string) {
@@ -877,12 +966,19 @@ async function selectCandidateOption(page: Page, candidate: InteractiveCandidate
   throw new Error(`Unable to select "${value}" for ${candidate.text}.`);
 }
 
-async function fillCandidate(page: Page, candidate: InteractiveCandidate, value: string) {
+async function fillCandidate(
+  page: Page,
+  candidate: InteractiveCandidate,
+  value: string,
+  strictVisualMode: boolean,
+) {
   if (candidate.disabled) {
     throw new Error(`Target "${candidate.text}" is disabled.`);
   }
 
   if (candidate.tagName === "select" || candidate.role === "combobox") {
+    let visualFailureReason = `visual select for "${candidate.text}" was not confirmed`;
+
     try {
       await focusCandidateByPoint(page, candidate);
       await page.keyboard.type(value, { delay: 35 });
@@ -902,16 +998,26 @@ async function fillCandidate(page: Page, candidate: InteractiveCandidate, value:
           .catch(() => "");
 
         if (selectedText && selectedText.toLowerCase().includes(value.trim().toLowerCase())) {
-          return;
+          return visualOnlyExecution(strictVisualMode);
         }
       }
-    } catch {
-      // Fall through to DOM fallback for native selects.
+      visualFailureReason = `visual select for "${candidate.text}" did not set "${value}"`;
+    } catch (error) {
+      visualFailureReason = error instanceof Error ? error.message : String(error);
+    }
+
+    if (strictVisualMode) {
+      throw new ExecutionAttemptError(
+        `Strict visual mode blocked DOM fallback after ${visualFailureReason}.`,
+        visualOnlyExecution(strictVisualMode, visualFailureReason),
+      );
     }
 
     await selectCandidateOption(page, candidate, value);
-    return;
+    return domAssistExecution(strictVisualMode, visualFailureReason);
   }
+
+  let visualFailureReason = `visual typing into "${candidate.text}" was not confirmed`;
 
   try {
     await focusCandidateByPoint(page, candidate);
@@ -923,13 +1029,21 @@ async function fillCandidate(page: Page, candidate: InteractiveCandidate, value:
       const typedValue = await page.locator(candidate.selector).inputValue().catch(() => "");
 
       if (typedValue === value) {
-        return;
+        return visualOnlyExecution(strictVisualMode);
       }
     } else {
-      return;
+      return visualOnlyExecution(strictVisualMode);
     }
-  } catch {
-    // Fall through to DOM fallback.
+    visualFailureReason = `visual typing into "${candidate.text}" did not match the requested value`;
+  } catch (error) {
+    visualFailureReason = error instanceof Error ? error.message : String(error);
+  }
+
+  if (strictVisualMode) {
+    throw new ExecutionAttemptError(
+      `Strict visual mode blocked DOM fallback after ${visualFailureReason}.`,
+      visualOnlyExecution(strictVisualMode, visualFailureReason),
+    );
   }
 
   for (const buildLocator of candidateLocators(page, candidate)) {
@@ -942,30 +1056,31 @@ async function fillCandidate(page: Page, candidate: InteractiveCandidate, value:
 
       if (await locator.isEditable().catch(() => false)) {
         await locator.fill(value, { timeout: 8_000 });
-        return;
+        return domAssistExecution(strictVisualMode, visualFailureReason);
       }
 
       if (await locator.isVisible().catch(() => false)) {
         await locator.click({ timeout: 8_000 });
         await page.keyboard.press("Control+A").catch(() => undefined);
         await page.keyboard.type(value, { delay: 28 });
-        return;
+        return domAssistExecution(strictVisualMode, visualFailureReason);
       }
     } catch {
       // Fall through to the next locator or coordinate fallback.
     }
   }
 
-  await focusCandidateByPoint(page, candidate);
-  await page.keyboard.press("Control+A").catch(() => undefined);
-  await page.keyboard.press("Backspace").catch(() => undefined);
-  await page.keyboard.type(value, { delay: 28 });
+  throw new ExecutionAttemptError(
+    `Unable to fill "${candidate.text}" after DOM assist. ${visualFailureReason}`,
+    domAssistExecution(strictVisualMode, visualFailureReason),
+  );
 }
 
 async function fillFieldSet(
   page: Page,
   decision: ParsedAgentDecision,
   candidates: InteractiveCandidate[],
+  strictVisualMode: boolean,
 ) {
   const fields = decision.nextAction.fields ?? [];
 
@@ -982,11 +1097,15 @@ async function fillFieldSet(
       throw new Error("Model selected fill_form without values.");
     }
 
-    await fillCandidate(page, targetCandidate, fallbackValue);
-    return [targetCandidate.text];
+    const execution = await fillCandidate(page, targetCandidate, fallbackValue, strictVisualMode);
+    return {
+      filledTargets: [targetCandidate.text],
+      execution,
+    };
   }
 
   const filledTargets: string[] = [];
+  const executions: ActionExecutionAssist[] = [];
 
   for (const field of fields) {
     const targetCandidate = findCandidateByReference(field.targetId, candidates);
@@ -995,11 +1114,14 @@ async function fillFieldSet(
       throw new Error(`Model selected unknown field ${field.targetId}.`);
     }
 
-    await fillCandidate(page, targetCandidate, field.value);
+    executions.push(await fillCandidate(page, targetCandidate, field.value, strictVisualMode));
     filledTargets.push(targetCandidate.text);
   }
 
-  return filledTargets;
+  return {
+    filledTargets,
+    execution: mergeExecutionAssists(strictVisualMode, executions),
+  };
 }
 
 function stepIntent(decisionKind: Decision["kind"]): "load" | "scan" | "type" | "click" {
@@ -1103,6 +1225,7 @@ async function executeModelDecision(
   page: Page,
   decision: ParsedAgentDecision,
   candidates: InteractiveCandidate[],
+  strictVisualMode: boolean,
 ) {
   const targetCandidate = resolveCandidate(decision, candidates);
 
@@ -1111,21 +1234,23 @@ async function executeModelDecision(
       throw new Error("Model selected click without a valid target candidate.");
     }
 
-    await clickCandidate(page, targetCandidate);
+    const execution = await clickCandidate(page, targetCandidate, strictVisualMode);
     return {
       kind: "click" as const,
       ok: true,
       details: decision.nextAction.rationale,
+      execution,
     };
   }
 
   if (decision.nextAction.kind === "fill_form") {
-    const filledTargets = await fillFieldSet(page, decision, candidates);
+    const { filledTargets, execution } = await fillFieldSet(page, decision, candidates, strictVisualMode);
 
     return {
       kind: "type" as const,
       ok: true,
       details: `filled ${filledTargets.join(", ")}`,
+      execution,
     };
   }
 
@@ -1135,6 +1260,7 @@ async function executeModelDecision(
       kind: "scroll" as const,
       ok: true,
       details: decision.nextAction.rationale,
+      execution: visualOnlyExecution(strictVisualMode),
     };
   }
 
@@ -1143,6 +1269,7 @@ async function executeModelDecision(
       kind: "wait" as const,
       ok: true,
       details: decision.nextAction.rationale,
+      execution: noDirectInteractionExecution(strictVisualMode),
     };
   }
 
@@ -1152,6 +1279,7 @@ async function executeModelDecision(
       kind: "retry" as const,
       ok: true,
       details: decision.nextAction.rationale,
+      execution: noDirectInteractionExecution(strictVisualMode),
     };
   }
 
@@ -1160,6 +1288,7 @@ async function executeModelDecision(
       kind: "stop" as const,
       ok: true,
       details: decision.nextAction.rationale,
+      execution: noDirectInteractionExecution(strictVisualMode),
     };
   }
 
@@ -1167,7 +1296,18 @@ async function executeModelDecision(
     kind: "escalate" as const,
     ok: false,
     details: decision.nextAction.rationale,
+    execution: noDirectInteractionExecution(strictVisualMode),
   };
+}
+
+function actionKindForDecision(
+  kind: ParsedAgentDecision["nextAction"]["kind"],
+): ActionResult["kind"] {
+  if (kind === "fill_form") {
+    return "type";
+  }
+
+  return kind;
 }
 
 function buildEmotion(
@@ -1337,6 +1477,7 @@ async function runModelDrivenFlow(
     const decisionContext = {
       scenarioName: scenario.name,
       goal: input.config.goal,
+      strictVisualMode: input.config.strictVisualMode ?? false,
       persona: input.persona,
       playbook,
       step: steps.length,
@@ -1395,7 +1536,26 @@ async function runModelDrivenFlow(
     }
 
     const decision = normalizeModelDecision(modelDecision, targetCandidate);
-    const action = await executeModelDecision(page, modelDecision, candidates);
+    let action: ActionResult;
+
+    try {
+      action = await executeModelDecision(
+        page,
+        modelDecision,
+        candidates,
+        input.config.strictVisualMode ?? false,
+      );
+    } catch (error) {
+      action = {
+        kind: actionKindForDecision(modelDecision.nextAction.kind),
+        ok: false,
+        details: error instanceof Error ? error.message : "Execution failed unexpectedly.",
+        execution:
+          error instanceof ExecutionAttemptError
+            ? error.execution
+            : noDirectInteractionExecution(input.config.strictVisualMode ?? false),
+      };
+    }
 
     await sleep(paceMs(input.persona, stepIntent(decision.kind)));
     const nextPageState = await appendStep(
@@ -1412,6 +1572,7 @@ async function runModelDrivenFlow(
     );
 
     if (
+      !action.ok ||
       decision.kind === "stop" ||
       decision.kind === "escalate" ||
       scenarioCompleted(scenario, nextPageState)
@@ -1491,6 +1652,7 @@ async function runLiveAgent(
       ok: false,
       details: finalPage.errorFlags[0] ?? "execution failed unexpectedly",
       nextPage: finalPage,
+      execution: noDirectInteractionExecution(input.config.strictVisualMode ?? false),
     };
 
     if (steps.length < input.config.maxSteps) {
@@ -1540,6 +1702,7 @@ export async function runLiveSwarm(options: LiveSwarmOptions) {
           maxSteps: options.maxSteps,
           seed: `${options.runId}-${index + 1}`,
           demoMode: false,
+          strictVisualMode: options.strictVisualMode,
         },
       };
       const result = await runLiveAgent(browser, options.scenario, input, options);

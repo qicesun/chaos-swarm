@@ -90,11 +90,13 @@ export default async function ReportPage({ params }: ReportPageProps) {
         </p>
       </section>
 
-      <section className="mt-8 grid gap-5 lg:grid-cols-4">
+      <section className="mt-8 grid gap-5 lg:grid-cols-3 xl:grid-cols-6">
         <MetricCard label="EFI" value={String(report.efi.score)} />
         <MetricCard label={<T k="report.failureClustersMetric" />} value={String(report.failureClusters.length)} />
         <MetricCard label={<T k="report.highlights" />} value={String(report.highlightReel.length)} />
         <MetricCard label={<T k="report.heatPoints" />} value={String(report.heatmap.length)} />
+        <MetricCard label={<T k="report.visualPurity" />} value={`${report.executionQuality.visualPurity}%`} />
+        <MetricCard label={<T k="report.domAssistRate" />} value={`${report.executionQuality.domAssistRate}%`} />
       </section>
 
       <section className="mt-8 grid gap-6 lg:grid-cols-[1fr_0.95fr]">
@@ -148,6 +150,39 @@ export default async function ReportPage({ params }: ReportPageProps) {
             ))}
           </div>
         </aside>
+      </section>
+
+      <section className="mt-8 panel rounded-[2rem] p-7">
+        <p className="text-sm uppercase tracking-[0.25em] text-[var(--muted)]">
+          <T k="report.executionPurity" />
+        </p>
+        <h2 className="mt-2 text-3xl font-semibold tracking-tight">
+          <T k="report.executionPurityTitle" />
+        </h2>
+        <div className="mt-6 grid gap-4 lg:grid-cols-2">
+          <div className="rounded-[1.5rem] border border-[var(--line)] bg-white/60 p-5">
+            <div className="flex items-center justify-between gap-4">
+              <span className="text-sm uppercase tracking-[0.18em] text-[var(--muted)]">
+                <T k="report.strictVisualMode" />
+              </span>
+              <span className="font-semibold">
+                {report.executionQuality.strictVisualMode ? "ON" : "OFF"}
+              </span>
+            </div>
+            <div className="mt-4 space-y-4">
+              <MetricRow label={<T k="report.visualPurity" />} value={`${report.executionQuality.visualPurity}%`} />
+              <MetricRow label={<T k="report.domAssistRate" />} value={`${report.executionQuality.domAssistRate}%`} />
+            </div>
+          </div>
+          <div className="rounded-[1.5rem] border border-[var(--line)] bg-white/60 p-5">
+            <div className="space-y-3">
+              <MetricRow label={<T k="report.totalInteractionActions" />} value={String(report.executionQuality.totalInteractionActions)} />
+              <MetricRow label={<T k="report.visualOnlyActions" />} value={String(report.executionQuality.visualOnlyActions)} />
+              <MetricRow label={<T k="report.domAssistedActions" />} value={String(report.executionQuality.domAssistedActions)} />
+              <MetricRow label={<T k="report.domOnlyActions" />} value={String(report.executionQuality.domOnlyActions)} />
+            </div>
+          </div>
+        </div>
       </section>
 
       <section className="mt-8 grid gap-6 lg:grid-cols-[0.95fr_1.05fr]">
@@ -234,6 +269,15 @@ function MetricCard({ label, value }: { label: ReactNode; value: string }) {
     <div className="panel rounded-[1.7rem] p-5">
       <p className="text-sm uppercase tracking-[0.2em] text-[var(--muted)]">{label}</p>
       <p className="metric-value mt-3 text-4xl font-semibold tracking-tight">{value}</p>
+    </div>
+  );
+}
+
+function MetricRow({ label, value }: { label: ReactNode; value: string }) {
+  return (
+    <div className="flex items-center justify-between gap-4 rounded-[1rem] bg-[rgba(23,20,18,0.04)] px-4 py-3">
+      <span className="text-sm text-[var(--muted)]">{label}</span>
+      <span className="font-mono text-sm">{value}</span>
     </div>
   );
 }
