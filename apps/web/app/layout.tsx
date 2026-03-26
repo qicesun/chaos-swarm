@@ -1,7 +1,9 @@
 import type { Metadata } from "next";
+import { cookies } from "next/headers";
 import { IBM_Plex_Mono, Space_Grotesk } from "next/font/google";
 import { LanguageToggle } from "@/components/language-toggle";
 import { LocaleProvider } from "@/components/locale-provider";
+import type { Locale } from "@/lib/i18n";
 import "./globals.css";
 
 const display = Space_Grotesk({
@@ -20,18 +22,22 @@ export const metadata: Metadata = {
   description: "Synthetic user swarm UX chaos testing demo for public web funnels.",
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  const cookieStore = await cookies();
+  const localeCookie = cookieStore.get("chaos-swarm-locale")?.value;
+  const initialLocale: Locale = localeCookie === "zh" ? "zh" : "en";
+
   return (
     <html
-      lang="en"
+      lang={initialLocale}
       className={`${display.variable} ${mono.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col">
-        <LocaleProvider>
+        <LocaleProvider initialLocale={initialLocale}>
           <div className="grain" />
           <LanguageToggle />
           {children}

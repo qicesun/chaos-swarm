@@ -19,24 +19,30 @@ interface LocaleContextValue {
 const LocaleContext = createContext<LocaleContextValue | null>(null);
 const STORAGE_KEY = "chaos-swarm-locale";
 
-export function LocaleProvider({ children }: { children: ReactNode }) {
-  const [locale, setLocale] = useState<Locale>(() => {
-    if (typeof window === "undefined") {
-      return "en";
-    }
+export function LocaleProvider({
+  children,
+  initialLocale,
+}: {
+  children: ReactNode;
+  initialLocale: Locale;
+}) {
+  const [locale, setLocaleState] = useState<Locale>(initialLocale);
 
-    const stored = window.localStorage.getItem(STORAGE_KEY);
-
-    if (stored === "en" || stored === "zh") {
-      return stored;
-    }
-
-    return window.navigator.language.toLowerCase().startsWith("zh") ? "zh" : "en";
-  });
+  function setLocale(nextLocale: Locale) {
+    setLocaleState(nextLocale);
+  }
 
   useEffect(() => {
+    const storedLocale = window.localStorage.getItem(STORAGE_KEY);
+
+    if ((storedLocale === "en" || storedLocale === "zh") && storedLocale !== locale) {
+      const timer = window.setTimeout(() => setLocaleState(storedLocale), 0);
+      return () => window.clearTimeout(timer);
+    }
+
     document.documentElement.lang = locale;
     window.localStorage.setItem(STORAGE_KEY, locale);
+    document.cookie = `${STORAGE_KEY}=${locale}; path=/; max-age=31536000; samesite=lax`;
   }, [locale]);
 
   const value = useMemo<LocaleContextValue>(
