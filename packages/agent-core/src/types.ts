@@ -40,6 +40,7 @@ export type DecisionKind = "click" | "type" | "scroll" | "wait" | "retry" | "esc
 export interface Decision {
   kind: DecisionKind;
   rationale: string;
+  rationaleZh?: string;
   target?: string;
   value?: string;
 }

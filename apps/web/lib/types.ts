@@ -13,6 +13,7 @@ export interface TimelineEvent {
   titleZh?: string;
   detailZh?: string;
   rationale: string;
+  rationaleZh?: string;
   action: string;
   actionCode: string;
   decisionKind: string;

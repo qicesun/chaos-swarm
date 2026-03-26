@@ -54,6 +54,10 @@ function eventDetail(event: RunRecord["events"][number], locale: Locale) {
   return locale === "zh" ? event.detailZh ?? event.detail : event.detail;
 }
 
+function eventRationale(event: RunRecord["events"][number], locale: Locale) {
+  return locale === "zh" ? event.rationaleZh ?? event.rationale : event.rationale;
+}
+
 function localizeWarning(locale: Locale, warning: string) {
   if (locale !== "zh") {
     return warning;
@@ -401,7 +405,7 @@ export function RunMonitor({ initialRun }: RunMonitorProps) {
                             <p className="text-[11px] uppercase tracking-[0.14em] text-[var(--muted)]">
                               {pick(locale, "Why the agent chose this move", "Agent 为什么这样做")}
                             </p>
-                            <p className="mt-1 text-sm leading-7 text-[var(--muted)]">{latestEvent.rationale}</p>
+                            <p className="mt-1 text-sm leading-7 text-[var(--muted)]">{eventRationale(latestEvent, locale)}</p>
                           </div>
                           <div className="grid gap-3 sm:grid-cols-2">
                             <div className="rounded-[1rem] bg-[rgba(23,20,18,0.04)] px-3 py-3">
@@ -584,7 +588,7 @@ export function RunMonitor({ initialRun }: RunMonitorProps) {
                   <p className="text-sm uppercase tracking-[0.18em] text-[var(--muted)]">
                     {pick(locale, "Why the agent acted", "Agent 为什么这样做")}
                   </p>
-                  <p className="mt-1 text-sm leading-7 text-[var(--muted)]">{event.rationale}</p>
+                  <p className="mt-1 text-sm leading-7 text-[var(--muted)]">{eventRationale(event, locale)}</p>
                   <p className="mt-3 text-sm leading-7 text-[var(--muted)]">
                     {pick(locale, "Frustration", "挫败值")} {event.frustration}% ·{" "}
                     {pick(locale, "Confidence", "信心")} {event.confidence}%

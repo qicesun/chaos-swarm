@@ -202,6 +202,7 @@ function toTimeline(agentRuns: AgentRunResult[], scenario: DemoScenarioDefinitio
           titleZh,
           detailZh: describeStepDetail(step, "zh"),
           rationale: step.decision.rationale,
+          rationaleZh: step.decision.rationaleZh,
           action: title,
           actionCode: `${step.decision.kind} -> ${step.action.kind}`,
           decisionKind: step.decision.kind,

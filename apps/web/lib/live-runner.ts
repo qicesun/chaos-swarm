@@ -1190,7 +1190,8 @@ function normalizeModelDecision(
 
   return {
     kind: modelDecision.nextAction.kind === "fill_form" ? "type" : modelDecision.nextAction.kind,
-    rationale: `${modelDecision.pageAssessment} ${modelDecision.nextAction.rationale}`.trim(),
+    rationale: `${modelDecision.pageAssessment} ${modelDecision.nextAction.rationale.en}`.trim(),
+    rationaleZh: modelDecision.nextAction.rationale.zh,
     target,
     value,
   };
@@ -1255,7 +1256,7 @@ async function executeModelDecision(
     return {
       kind: "click" as const,
       ok: true,
-      details: decision.nextAction.rationale,
+      details: decision.nextAction.rationale.en,
       execution,
     };
   }
@@ -1276,7 +1277,7 @@ async function executeModelDecision(
     return {
       kind: "scroll" as const,
       ok: true,
-      details: decision.nextAction.rationale,
+      details: decision.nextAction.rationale.en,
       execution: visualOnlyExecution(strictVisualMode),
     };
   }
@@ -1285,7 +1286,7 @@ async function executeModelDecision(
     return {
       kind: "wait" as const,
       ok: true,
-      details: decision.nextAction.rationale,
+      details: decision.nextAction.rationale.en,
       execution: noDirectInteractionExecution(strictVisualMode),
     };
   }
@@ -1295,7 +1296,7 @@ async function executeModelDecision(
     return {
       kind: "retry" as const,
       ok: true,
-      details: decision.nextAction.rationale,
+      details: decision.nextAction.rationale.en,
       execution: noDirectInteractionExecution(strictVisualMode),
     };
   }
@@ -1304,7 +1305,7 @@ async function executeModelDecision(
     return {
       kind: "stop" as const,
       ok: true,
-      details: decision.nextAction.rationale,
+      details: decision.nextAction.rationale.en,
       execution: noDirectInteractionExecution(strictVisualMode),
     };
   }
@@ -1312,7 +1313,7 @@ async function executeModelDecision(
   return {
     kind: "escalate" as const,
     ok: false,
-    details: decision.nextAction.rationale,
+    details: decision.nextAction.rationale.en,
     execution: noDirectInteractionExecution(strictVisualMode),
   };
 }
@@ -1608,8 +1609,8 @@ async function runModelDrivenFlow(
       },
       successReason: action.ok
         ? {
-            en: modelDecision.nextAction.rationale,
-            zh: modelDecision.nextAction.rationale,
+            en: modelDecision.nextAction.rationale.en,
+            zh: modelDecision.nextAction.rationale.zh,
           }
         : null,
       failureReason: action.ok
