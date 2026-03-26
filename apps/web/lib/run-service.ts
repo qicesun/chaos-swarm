@@ -539,6 +539,11 @@ export function getDemoScenarios() {
   return listScenarios();
 }
 
+interface CreatedRun {
+  record: RunRecord;
+  start: () => Promise<void>;
+}
+
 export async function createRun(input: unknown) {
   const payload = createRunSchema.parse(input);
   const scenario = getScenario(payload.demoScenario);
@@ -587,11 +592,21 @@ export async function createRun(input: unknown) {
   upsertRunInStore(record);
   await persistBestEffort(record);
 
-  const job = executeRun(record, scenario, personas, maxSteps);
-  activeJobs.set(record.id, job);
-  void job;
+  return {
+    record,
+    start: async () => {
+      const existingJob = activeJobs.get(record.id);
 
-  return record;
+      if (existingJob) {
+        await existingJob;
+        return;
+      }
+
+      const job = executeRun(record, scenario, personas, maxSteps);
+      activeJobs.set(record.id, job);
+      await job;
+    },
+  } satisfies CreatedRun;
 }
 
 export async function getRunRecord(id: string) {

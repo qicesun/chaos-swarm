@@ -1,16 +1,17 @@
-import { NextResponse } from "next/server";
+import { after, NextResponse } from "next/server";
 import { createRun } from "@/lib/run-service";
 
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const record = await createRun(body);
+    const createdRun = await createRun(body);
+    after(createdRun.start);
 
     return NextResponse.json(
       {
-        runId: record.id,
-        status: record.status,
-        reportId: record.id,
+        runId: createdRun.record.id,
+        status: createdRun.record.status,
+        reportId: createdRun.record.id,
       },
       { status: 201 },
     );
